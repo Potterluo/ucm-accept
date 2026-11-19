@@ -123,7 +123,7 @@ ucm-accept --doctor --probe
 - wheel / sdist
 - Windows x64 exe
 - Linux amd64/arm64 deb、rpm、portable tar
-- amd64/arm64 Docker 镜像 + multi-arch manifest（`ghcr.io/ucm-system/ucm-accept`）
+- amd64/arm64 Docker 镜像 + multi-arch manifest（`ghcr.io/ucm-system/ucm-accept`；GHCR 包可能需登录，离线请用 Release 中的 image tar）
 - amd64/arm64 离线 wheelhouse
 - `SHA256SUMS`
 

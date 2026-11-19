@@ -4,6 +4,10 @@
 产物：<https://github.com/ucm-system/ucm-accept/releases>
 镜像：`ghcr.io/ucm-system/ucm-accept:<version>` 与 `:latest`
 
+> 仓库已 public，但 GHCR 包是在仓库 private 时创建的，包可见性可能仍为 private。
+> 无 GHCR 登录的客户请直接使用 Release 中的 `ucm-accept-<version>-<arch>.tar.gz`，`docker load` 即可；
+> 或由组织管理员在 Package settings 中把包改为 public。
+
 所有二进制包与镜像均由 GitHub Actions 从源码构建，不使用本地交叉编译，也不使用 QEMU 模拟：
 amd64 使用 `ubuntu-latest`，arm64 使用 GitHub 原生 `ubuntu-24.04-arm`。
 

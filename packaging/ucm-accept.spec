@@ -10,7 +10,7 @@ import importlib.util
 
 from PyInstaller.utils.hooks import collect_all
 
-ROOT = Path(SPECPATH).resolve().parent.parent  # noqa: F821
+ROOT = Path(SPECPATH).resolve().parent  # noqa: F821  # spec 位于 packaging/，上一级即仓库根目录
 
 datas = [(str(ROOT / "ucm_accept" / "resources"), "ucm_accept/resources")]
 binaries = []

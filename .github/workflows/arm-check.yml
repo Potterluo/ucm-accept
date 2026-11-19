@@ -1,8 +1,0 @@
-name: arm-check
-on:
-  workflow_dispatch:
-jobs:
-  arm:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - run: uname -a && python3 --version

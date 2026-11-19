@@ -70,6 +70,32 @@ jobs:
           name: python-dist
           path: dist/*
 
+  validate-python-dist:
+    name: validate wheel / sdist
+    runs-on: ubuntu-latest
+    needs: [prepare, python-dist]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: twine check
+        run: |
+          python -m pip install --upgrade pip twine
+          twine check dist/*
+      - name: Clean-venv install + smoke
+        run: |
+          python -m venv /tmp/pkg-venv
+          /tmp/pkg-venv/bin/pip install --upgrade pip
+          /tmp/pkg-venv/bin/pip install dist/*.whl
+          /tmp/pkg-venv/bin/pip check
+          /tmp/pkg-venv/bin/ucm-accept --version
+          /tmp/pkg-venv/bin/ucm-accept --mock --fast --item perf --outputs /tmp/wheel-smoke
+          test -s /tmp/wheel-smoke/runs/*/report.html
+
   linux-packages:
     name: linux packages (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -81,7 +107,7 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-latest
-            nfpm_arch: amd64
+            nfpm_arch: x86_64
           - arch: arm64
             runner: ubuntu-24.04-arm
             nfpm_arch: arm64
@@ -105,6 +131,15 @@ jobs:
           nfpm --version
       - name: Build PyInstaller + deb/rpm
         run: bash scripts/build_linux.sh "${{ needs.prepare.outputs.version }}" "${{ matrix.arch }}"
+      - name: Validate Linux artifacts
+        run: |
+          "dist/ucm-accept-linux-${{ matrix.arch }}/ucm-accept" --version
+          "dist/ucm-accept-linux-${{ matrix.arch }}/ucm-accept" --mock --fast --item perf --outputs "/tmp/linux-smoke-${{ matrix.arch }}"
+          test -s /tmp/linux-smoke-${{ matrix.arch }}/runs/*/report.html
+          dpkg-deb --info dist/ucm-accept_${{ needs.prepare.outputs.version }}_${{ matrix.arch }}.deb
+          dpkg-deb --contents dist/ucm-accept_${{ needs.prepare.outputs.version }}_${{ matrix.arch }}.deb | head -20
+          sudo apt-get install -y rpm
+          rpm -qip dist/ucm-accept-${{ needs.prepare.outputs.version }}-1.*.rpm
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -136,6 +171,12 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean packaging/ucm-accept.spec
+      - name: Validate Windows executable
+        shell: pwsh
+        run: |
+          & "dist\ucm-accept\ucm-accept.exe" --version
+          & "dist\ucm-accept\ucm-accept.exe" --mock --fast --item perf --outputs "$env:RUNNER_TEMP\ucm-exe-smoke"
+          if (-not (Test-Path "$env:RUNNER_TEMP\ucm-exe-smoke\runs\*\report.html")) { throw "smoke report missing" }
           Compress-Archive -Path "dist\ucm-accept\*" -DestinationPath "dist\ucm-accept-windows-x64.zip" -Force
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -163,13 +204,24 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Download wheels
+      - name: Download and normalize offline wheels
         run: |
           mkdir -p offline/wheelhouse
           python -m pip install --upgrade pip wheel
-          pip download --only-binary=:all: -d offline/wheelhouse \
+          pip download --prefer-binary -d offline/wheelhouse \
             "evalscope[perf,service]>=1.15,<2" "gradio>=6.0,<7" "PyYAML>=6"
+          # 少数包（如 jieba）只发源码包；在构建机先转成 wheel，保证客户现场不用编译器。
+          find offline/wheelhouse -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 \
+            | xargs -0 -r -n1 python -m pip wheel --no-deps --wheel-dir offline/wheelhouse
+          find offline/wheelhouse -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -delete
           pip wheel --no-deps -w offline/wheelhouse .
+      - name: Validate offline install
+        run: |
+          python -m venv /tmp/offline-venv
+          /tmp/offline-venv/bin/pip install --no-index --find-links offline/wheelhouse \
+            "ucm-accept==${{ needs.prepare.outputs.version }}" "evalscope[perf,service]>=1.15,<2"
+          /tmp/offline-venv/bin/ucm-accept --version
+          /tmp/offline-venv/bin/ucm-accept --mock --fast --item perf --outputs /tmp/offline-smoke
       - name: Build tooling bundle
         run: |
           cp packaging/config.offline.yaml offline/
@@ -223,6 +275,8 @@ jobs:
         run: |
           IMAGE=ghcr.io/ucm-system/ucm-accept:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
           docker push "${IMAGE}"
+          docker run --rm "${IMAGE}" --version
+          docker run --rm "${IMAGE}" --mock --fast --item perf --outputs /tmp/docker-smoke
           mkdir -p dist
           docker save "${IMAGE}" | gzip -1 > "dist/ucm-accept-${{ needs.prepare.outputs.version }}-${{ matrix.arch }}.tar.gz"
           ls -lh dist/*.tar.gz
@@ -266,6 +320,7 @@ jobs:
     needs:
       - prepare
       - python-dist
+      - validate-python-dist
       - linux-packages
       - windows-exe
       - offline-wheelhouse

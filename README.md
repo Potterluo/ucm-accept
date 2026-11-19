@@ -1,5 +1,9 @@
 # UCM 推理加速产品 · 客户现网验收工具
 
+[![ci](https://github.com/ucm-system/ucm-accept/actions/workflows/ci.yml/badge.svg)](https://github.com/ucm-system/ucm-accept/actions/workflows/ci.yml)
+[![release](https://github.com/ucm-system/ucm-accept/actions/workflows/release.yml/badge.svg)](https://github.com/ucm-system/ucm-accept/actions/workflows/release.yml)
+[![release v1.1.0](https://img.shields.io/github/v/release/ucm-system/ucm-accept)](https://github.com/ucm-system/ucm-accept/releases)
+
 面向交付/服务人员的**离线验收编排与呈现工具**。测试逻辑全部交给 [EvalScope](https://github.com/modelscope/evalscope)，本工具只负责：
 
 - 预设五项验收测试的参数与顺序；

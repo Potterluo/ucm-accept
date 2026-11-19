@@ -33,7 +33,7 @@ ucm-accept = "ucm_accept.cli:main"
 ucm-accept-gui = "ucm_accept.gui:main"
 
 [project.urls]
-Documentation = "https://github.com/example/ucm-accept"
+Documentation = "https://github.com/ucm-system/ucm-accept"
 
 [tool.setuptools]
 include-package-data = true

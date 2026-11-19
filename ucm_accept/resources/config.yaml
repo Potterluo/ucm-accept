@@ -1,0 +1,168 @@
+# =============================================================================
+# UCM 推理加速验收工具 · 默认配置
+# -----------------------------------------------------------------------------
+# 所有预设参数均外置在此文件。交付人员可修改本文件，无需改动代码。
+# 支持 ${ENV_VAR} 与 ${ENV_VAR:-默认值} 环境变量展开，便于离线镜像注入。
+# 构建离线包时请将 tokenizer / 数据集路径改为镜像内绝对路径。
+# =============================================================================
+schema_version: 1
+
+app:
+  title: UCM 推理加速验收工具
+  subtitle: 客户现网 LLM 推理加速效果与服务质检验收
+  report_dir: ./outputs
+  language: zh_CN
+  # 模拟引擎用于交付演示、CI 虚跑与离线自检，不产生真实压测流量。
+  mock:
+    delay_ms: 180
+    profile: nominal        # nominal | degraded
+
+endpoint:
+  base_url: http://127.0.0.1:8801/v1
+  model: Qwen2.5-0.5B-Instruct
+  api_key: ""
+  timeout_s: 180
+  connect_timeout_s: 8
+  probe_mode: auto          # auto | models | chat
+  verify_ssl: false
+
+defaults:
+  context_length: 65536
+  concurrency: 20
+  requests: 200
+  input_length: 65536
+  output_length: 256
+  hit_rate: 0.0
+
+perf:
+  # 并发梯度；默认单点 20 并发，可在高级选项中改为 [10, 20, 40]。
+  parallel: [20]
+  number: 200
+  warmup_num: 20
+  min_prompt_length: 65536
+  max_prompt_length: 65536
+  min_tokens: 256
+  max_tokens: 256
+  tokenizer_path: Qwen/Qwen2.5-0.5B-Instruct
+  dataset: random
+  request_timeout_s: 21600
+  success_threshold: 0.95
+  extra_args: []
+  env: {}
+
+multiturn:
+  scenario: dialogue
+  scenarios:
+    dialogue:
+      label: 对话
+      description: 日常多轮问答，验证上下文累积后的响应质量与稳定性
+      dataset_path: datasets/multiturn/dialogue.jsonl
+    code:
+      label: 代码
+      description: 代码理解与修改类多轮任务，验证长上下文代码场景
+      dataset_path: datasets/multiturn/code.jsonl
+    office:
+      label: 办公
+      description: 文档摘要、表格与邮件类多轮任务，贴近办公场景
+      dataset_path: datasets/multiturn/office.jsonl
+  parallel: 4
+  conversations: 12
+  min_turns: 2
+  max_turns: 5
+  min_tokens: 128
+  max_tokens: 512
+  request_timeout_s: 180
+  extra_args: []
+
+sla:
+  # auto_tune : 调用 EvalScope --sla-auto-tune，原生支持 p90_ttft / p90_tpot（默认，验收主流程）
+  # verify    : 只跑目标并发（200）一个点，用 EvalScope perf 实测 P90 判定是否达标（快速复核）
+  mode: auto_tune
+  target:
+    context_length: 65536
+    concurrency: 200
+    ttft_p90_ms: 10000
+    tpot_p90_ms: 50
+  verify:
+    number: 200
+    warmup_num: 0
+  auto_tune:
+    lower: 2
+    upper: 200
+    # 与原命令一一对应，便于客户复现：
+    # evalscope perf ... --sla-auto-tune --sla-variable parallel \
+    #   --sla-params '[{"p90_ttft":"<10000ms","p90_tpot":"<50ms"}]'
+    variable: parallel
+    num_runs: 2
+    number_multiplier: 2
+    extra_args: []
+
+accuracy:
+  runs: 2
+  limit: 100
+  stability_threshold: 0.01
+  request_timeout_s: 14400
+  # 每项精度测试独立执行；默认四类数据集各跑两遍，用于验证 KVCache 落盘一致性。
+  datasets:
+    gpqa:
+      label: 基础问答
+      dataset: gpqa_diamond
+      subset: ""
+      limit: 50
+      description: GPQA Diamond，研究生级问答，衡量基础知识与推理
+    gsm8k:
+      label: 数学推理
+      dataset: gsm8k
+      subset: ""
+      limit: 100
+      description: GSM8K，小学数学应用题，衡量多步推理
+    longbench_v2:
+      label: 长文本
+      dataset: longbench_v2
+      subset: short
+      limit: 40
+      description: LongBench-v2 short 子集，衡量长上下文理解
+    bfcl_v3:
+      label: 工具调用
+      dataset: bfcl_v3
+      subset: ""
+      limit: 40
+      description: BFCL-v3，函数调用与工具选择能力
+  extra_args: []
+
+agent:
+  dataset_name: AgentX-claudecode
+  # EvalScope AgentX 默认 256K 上下文工作负载；低于该值只能降级为 smoke，指标不可比。
+  context_required: 262144
+  # 0 表示自动探测 /v1/models 的 max_model_len；探测不到时按 required 处理并提示。
+  context_detected: 0
+  parallel: 4
+  # EvalScope AgentX benchmark 模式要求 duration >= 900 秒。
+  duration_s: 900
+  success_threshold: 0.95
+  scenario_name: agentx
+  degraded:
+    mode: smoke
+    parallel: 1
+  extra_args: []
+
+evalscope:
+  executable: evalscope
+  # p90_ttft / p90_tpot 原生 SLA 参数要求 EvalScope >= 1.15。
+  min_version: "1.15.0"
+  outputs_dir: ./outputs/evalscope
+  env:
+    EVALSCOPE_LANGUAGE: zh
+  # 留空使用内置参数构造器；如需适配客户 EvalScope 版本，可按 argv 列表覆写。
+  perf_command: []
+  accuracy_command: []
+  multiturn_command: []
+  agent_command: []
+
+report:
+  title: UCM 推理加速产品验收报告
+  company: ""
+  operator: ""
+  footer: 本报告由 UCM 推理加速验收工具生成，原始数据可在输出目录中复核。
+  pdf:
+    enabled: true

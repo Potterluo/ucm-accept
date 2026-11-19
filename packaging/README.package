@@ -1,0 +1,9 @@
+UCM 推理加速验收工具（离线安装）
+
+1. 检查环境：ucm-accept --doctor --probe
+2. 启动 GUI：ucm-accept-gui
+3. CLI 菜单：ucm-accept
+4. 修改服务地址/模型：编辑 /etc/ucm-accept/config.yaml，或使用 CLI 菜单 [S]
+
+所有测试均由 EvalScope 原生执行。报告输出到 /data/outputs（可在配置中修改）。
+离线资产与 tokenizer 位于 /opt/ucm-accept/assets。

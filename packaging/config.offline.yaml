@@ -1,0 +1,22 @@
+# 离线交付配置模板：配合 /opt/ucm-accept 与 /opt/ucm-accept/assets。
+# 未列出的项自动继承 ucm_accept/resources/config.yaml 默认值。
+endpoint:
+  base_url: ${UCM_BASE_URL:-http://127.0.0.1:8801/v1}
+  model: ${UCM_MODEL:-Qwen2.5-0.5B-Instruct}
+  timeout_s: 180
+
+app:
+  report_dir: ${UCM_OUTPUTS:-/data/outputs}
+
+perf:
+  tokenizer_path: ${UCM_TOKENIZER_PATH:-/opt/ucm-accept/assets/tokenizers/Qwen2.5-0.5B-Instruct}
+
+evalscope:
+  executable: ${UCM_EVALSCOPE:-/opt/venv/bin/evalscope}
+  min_version: "1.15.0"
+
+sla:
+  mode: auto_tune
+
+agent:
+  duration_s: 900

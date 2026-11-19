@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=UCM 推理加速验收工具
+Comment=客户现网推理加速验收（GUI）
+Exec=/usr/bin/ucm-accept-gui
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true

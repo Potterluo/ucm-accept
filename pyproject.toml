@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ucm-accept"
+version = "1.1.0"
+description = "UCM 推理加速产品 · 客户现网验收工具（GUI + CLI，统一由 EvalScope 承载）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "UCM Delivery Engineering" }]
+keywords = ["ucm", "llm", "inference", "acceptance", "evalscope"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
+]
+
+dependencies = [
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+gui = ["gradio>=6.0,<7"]
+pdf = ["weasyprint>=61"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "gradio>=6.0,<7", "pyyaml>=6.0"]
+build = ["pyinstaller>=6.6"]
+
+[project.scripts]
+ucm-accept = "ucm_accept.cli:main"
+ucm-accept-gui = "ucm_accept.gui:main"
+
+[project.urls]
+Documentation = "https://github.com/example/ucm-accept"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["ucm_accept*"]
+
+[tool.setuptools.package-data]
+ucm_accept = ["resources/*.yaml", "resources/*.json", "resources/datasets/multiturn/*.jsonl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["gui: requires gradio"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["ucm_accept"]

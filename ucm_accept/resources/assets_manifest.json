@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "note": "离线包内置资产清单；构建脚本会补充数据集与 tokenizer。",
+  "assets": [
+    {
+      "path": "datasets/multiturn/code.jsonl",
+      "sha256": "426f83b2d60b3ec967081d7b16a8ce33c0e602fc47aa135cd5f190484cb0b821",
+      "size": 2548,
+      "required": true,
+      "category": "dataset"
+    },
+    {
+      "path": "datasets/multiturn/dialogue.jsonl",
+      "sha256": "75cc3e6936cee208e3c24d725d7139491d6857d1e5716c61b7d552e81a0855c9",
+      "size": 2593,
+      "required": true,
+      "category": "dataset"
+    },
+    {
+      "path": "datasets/multiturn/office.jsonl",
+      "sha256": "744e8a35d7f56c0887c28a1da401bb001428b986a9a905a54b0ee17e76da2c10",
+      "size": 2649,
+      "required": true,
+      "category": "dataset"
+    }
+  ]
+}

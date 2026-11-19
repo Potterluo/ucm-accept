@@ -116,7 +116,20 @@ ucm-accept --doctor --probe
 | 单项通过 / 关注 | 0 |
 | 单项未通过 | 2 |
 
-### 2.5 容器
+### 2.5 构建产物（GitHub Actions）
+
+仓库已配置完整打包流水线，产物发布在 [Releases](https://github.com/ucm-system/ucm-accept/releases)：
+
+- wheel / sdist
+- Windows x64 exe
+- Linux amd64/arm64 deb、rpm、portable tar
+- amd64/arm64 Docker 镜像 + multi-arch manifest（`ghcr.io/ucm-system/ucm-accept`）
+- amd64/arm64 离线 wheelhouse
+- `SHA256SUMS`
+
+流水线说明与校验矩阵见 [docs/packaging-pipeline.md](docs/packaging-pipeline.md)。
+
+### 2.6 容器
 
 ```bash
 docker run --rm -it \
@@ -300,7 +313,7 @@ ucm-accept --doctor --probe
 
 ## 七、离线构建
 
-完整流程见 [docs/offline-build.md](docs/offline-build.md)。核心原则：
+完整流程见 [docs/offline-build.md](docs/offline-build.md)；CI/Release 流水线见 [docs/packaging-pipeline.md](docs/packaging-pipeline.md)。核心原则：
 
 1. 在联网构建机预下载全部 Python wheel、数据集、tokenizer；
 2. 所有物料落到固定路径并生成 SHA256 清单；

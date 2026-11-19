@@ -20,11 +20,28 @@ pyinstaller --noconfirm --clean packaging/ucm-accept.spec
 rm -rf "dist/ucm-accept-linux-${ARCH}"
 mv dist/ucm-accept "dist/ucm-accept-linux-${ARCH}"
 
+case "$ARCH" in
+  amd64) RPM_ARCH="x86_64" ;;
+  arm64) RPM_ARCH="aarch64" ;;
+  *) echo "不支持的架构：$ARCH（只支持 amd64 / arm64）" >&2; exit 1 ;;
+esac
+
 mkdir -p dist
-ARCH="$ARCH" VERSION="$VERSION" nfpm package -f packaging/nfpm.yaml -p deb \
+render_config() {
+  local pkg_arch="$1"
+  local out="$2"
+  sed -e "s|\${PKG_ARCH}|${pkg_arch}|g"       -e "s|\${DIR_ARCH}|${ARCH}|g"       -e "s|\${VERSION}|${VERSION}|g" packaging/nfpm.yaml > "$out"
+}
+
+render_config "$ARCH" /tmp/ucm-nfpm-deb.yaml
+nfpm package -f /tmp/ucm-nfpm-deb.yaml -p deb \
   -t "dist/ucm-accept_${VERSION}_${ARCH}.deb"
-ARCH="$ARCH" VERSION="$VERSION" nfpm package -f packaging/nfpm.yaml -p rpm \
-  -t "dist/ucm-accept-${VERSION}-1.${ARCH}.rpm"
+
+render_config "$RPM_ARCH" /tmp/ucm-nfpm-rpm.yaml
+nfpm package -f /tmp/ucm-nfpm-rpm.yaml -p rpm \
+  -t "dist/ucm-accept-${VERSION}-1.${RPM_ARCH}.rpm"
+
+tar -C dist -czf "dist/ucm-accept-linux-${ARCH}.tar.gz" "ucm-accept-linux-${ARCH}"
 
 echo "完成："
-ls -lh dist/ucm-accept-linux-"${ARCH}" dist/*.deb dist/*.rpm
+ls -lh "dist/ucm-accept-linux-${ARCH}.tar.gz" dist/*.deb dist/*.rpm

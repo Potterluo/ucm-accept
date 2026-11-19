@@ -51,11 +51,19 @@ jobs:
       - name: Full mock acceptance
         run: |
           ucm-accept --mock --fast --all --outputs /tmp/ucm-smoke
-          python scripts/verify_report.py "$(ls -d /tmp/ucm-smoke/runs/*/report.json | head -1)"
+          REPORT="$(find /tmp/ucm-smoke/runs -name report.json -print -quit)"
+          python scripts/verify_report.py "$REPORT"
       - name: Export check
         run: |
           ucm-accept --mock --fast --item perf --outputs /tmp/ucm-export --report /tmp/ucm-export/report.html
           test -s /tmp/ucm-export/report.html
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: raven-actions/actionlint@v2
 
   build:
     name: build wheel

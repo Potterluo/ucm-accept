@@ -384,7 +384,8 @@ jobs:
       - name: Checksums
         run: |
           cd release-assets
-          find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs -r sha256sum > SHA256SUMS
+          find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs -r sha256sum > /tmp/ucm-SHA256SUMS
+          mv /tmp/ucm-SHA256SUMS SHA256SUMS
           du -sh .
           find . -maxdepth 2 -type f | sort | head -40
       - name: Publish GitHub Release

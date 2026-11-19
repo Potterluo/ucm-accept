@@ -140,14 +140,23 @@ jobs:
           dpkg-deb --contents dist/ucm-accept_${{ needs.prepare.outputs.version }}_${{ matrix.arch }}.deb | head -20
           sudo apt-get install -y rpm
           rpm -qip dist/ucm-accept-${{ needs.prepare.outputs.version }}-1.*.rpm
-      - name: Upload Linux artifacts
+      - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.arch }}-packages
-          path: |
-            dist/*.deb
-            dist/*.rpm
-            dist/ucm-accept-linux-${{ matrix.arch }}.tar.gz
+          name: linux-${{ matrix.arch }}-deb
+          path: dist/*.deb
+          if-no-files-found: error
+      - name: Upload rpm
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}-rpm
+          path: dist/*.rpm
+          if-no-files-found: error
+      - name: Upload portable bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}-bundle
+          path: dist/ucm-accept-linux-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   windows-exe:
@@ -330,15 +339,54 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - name: Download wheel / sdist
+        uses: actions/download-artifact@v4
         with:
-          path: release-assets
+          name: python-dist
+          path: release-assets/python-dist
+      - name: Download Linux amd64
+        uses: actions/download-artifact@v4
+        with:
+          pattern: linux-amd64-*
           merge-multiple: true
+          path: release-assets/linux-amd64
+      - name: Download Linux arm64
+        uses: actions/download-artifact@v4
+        with:
+          pattern: linux-arm64-*
+          merge-multiple: true
+          path: release-assets/linux-arm64
+      - name: Download Windows exe
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-exe
+          path: release-assets/windows-x64
+      - name: Download offline tooling amd64
+        uses: actions/download-artifact@v4
+        with:
+          name: offline-tooling-amd64
+          path: release-assets/offline-amd64
+      - name: Download offline tooling arm64
+        uses: actions/download-artifact@v4
+        with:
+          name: offline-tooling-arm64
+          path: release-assets/offline-arm64
+      - name: Download docker amd64 image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-amd64-image
+          path: release-assets/docker-amd64
+      - name: Download docker arm64 image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-arm64-image
+          path: release-assets/docker-arm64
       - name: Checksums
         run: |
           cd release-assets
-          find . -type f -printf '%P\n' | sort | xargs -r sha256sum > SHA256SUMS
-          ls -lh
+          find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs -r sha256sum > SHA256SUMS
+          du -sh .
+          find . -maxdepth 2 -type f | sort | head -40
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import re
 import socket
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -16,185 +17,213 @@ from .service import AcceptanceService
 from .utils import find_latest_report, has_desktop
 
 CSS = r"""
-/* ===================== 基础与字体 ===================== */
+/* ===================== Apple 风格设计系统 =====================
+   画布 #f5f5f7 · 白卡片 · 单一强调色 #0071e3 · 胶囊按钮 · 500ms 缓动 */
 :root{
-  --ucm-ink:#0d1a2b;--ucm-muted:#5d6b81;--ucm-line:#e5eaf3;--ucm-line-strong:#d5dce8;
-  --ucm-brand:#0b2a4a;--ucm-teal:#0e9f8c;--ucm-teal-deep:#0b6b63;
-  --ucm-bg:#eef2f8;--ucm-card:#ffffff;
-  --shadow-sm:0 1px 2px rgba(13,26,43,.05),0 2px 8px rgba(13,26,43,.05);
-  --shadow-md:0 4px 14px rgba(13,26,43,.08),0 1px 3px rgba(13,26,43,.06);
-  --shadow-lg:0 14px 34px rgba(11,42,74,.16);
+  --ink:#1d1d1f;--muted:#86868b;--muted-2:#6e6e73;
+  --line:#e8e8ed;--line-2:#d2d2d7;
+  --bg:#f5f5f7;--card:#ffffff;
+  --blue:#0071e3;--blue-hover:#0077ed;--blue-soft:rgba(0,113,227,.10);
+  --green:#34c759;--red:#ff3b30;--amber:#ff9f0a;
+  --ease:cubic-bezier(.25,.1,.25,1);
+  --radius-card:24px;--radius-input:12px;
+  --shadow-rest:0 1px 2px rgba(0,0,0,.03),0 4px 12px rgba(0,0,0,.04);
+  --shadow-hover:0 20px 40px rgba(0,0,0,.08);
+  --shadow-btn:0 4px 14px rgba(0,113,227,.30);
 }
-body,.gradio-container{background:
-  radial-gradient(1200px 420px at 18% -6%, rgba(14,159,140,.10), transparent 62%),
-  radial-gradient(900px 380px at 88% -10%, rgba(37,99,235,.08), transparent 58%),
-  var(--ucm-bg)!important;}
-.gradio-container{max-width:1360px!important;margin:0 auto!important;
-  font-family:"Segoe UI","HarmonyOS Sans SC","MiSans","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif!important;
-  color:var(--ucm-ink)!important;}
-.gradio-container h1,.gradio-container h2,.gradio-container h3{letter-spacing:.01em}
+body,.gradio-container{background:var(--bg)!important}
+.gradio-container{max-width:1200px!important;margin:0 auto!important;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",
+    "PingFang SC","HarmonyOS Sans SC","MiSans","Microsoft YaHei","Noto Sans CJK SC",sans-serif!important;
+  color:var(--ink)!important;-webkit-font-smoothing:antialiased}
 
 /* ===================== Gradio 原生样式扁平化 ===================== */
-.gradio-container .form{border:none!important;box-shadow:none!important;background:transparent!important;
-  padding:0!important}
+.gradio-container .form{border:none!important;box-shadow:none!important;background:transparent!important;padding:0!important}
 .gradio-container fieldset.block{background:transparent!important;border:none!important;box-shadow:none!important}
-.gradio-container span[data-testid="block-info"]{background:transparent!important;border:none!important;
-  box-shadow:none!important;padding:0 0 4px!important;margin:0!important;font-weight:640!important;
-  font-size:12.5px!important;color:#3d4c63!important;letter-spacing:.01em}
-.gradio-container label[data-testid="block-label"]{background:transparent!important;border:none!important;
-  box-shadow:none!important;font-weight:640!important;font-size:12.5px!important;color:#3d4c63!important}
+.gradio-container span[data-testid="block-info"],.gradio-container label[data-testid="block-label"]{
+  background:transparent!important;border:none!important;box-shadow:none!important;padding:0 0 5px!important;
+  margin:0!important;font-weight:500!important;font-size:12px!important;color:var(--muted-2)!important}
 .ucm-probe-status{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important}
 .gradio-container .styler{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important}
 .ucm-filebox{height:auto!important;min-height:0!important}
-.ucm-filebox > div, .ucm-filebox button, .ucm-filebox .empty, .ucm-filebox .wrap, .ucm-filebox .file-preview{
+.ucm-filebox > div,.ucm-filebox button,.ucm-filebox .empty,.ucm-filebox .wrap,.ucm-filebox .file-preview{
   min-height:0!important;height:auto!important}
-.ucm-filebox button{padding:10px 14px!important}
+.ucm-filebox button{padding:10px 16px!important}
 .ucm-import{height:auto!important;min-height:0!important}
-.ucm-import > div, .ucm-import button, .ucm-import .empty, .ucm-import .wrap, .ucm-import .upload-container,
-.ucm-import .file-preview, .ucm-import [data-testid="file"], .ucm-import .prose{
-  min-height:0!important;height:auto!important;color:var(--ucm-muted)!important;font-size:12px!important}
-.ucm-import button, .ucm-import .upload-container{background:#f6f9fc!important;border:1.5px dashed var(--ucm-line-strong)!important;
-  border-radius:10px!important;padding:10px 14px!important;box-shadow:none!important}
-.gradio-container .container.show_textbox_border, .gradio-container .input-container{background:transparent!important}
+.ucm-import > div,.ucm-import button,.ucm-import .empty,.ucm-import .wrap,.ucm-import .upload-container,
+.ucm-import .file-preview,.ucm-import [data-testid="file"],.ucm-import .prose{
+  min-height:0!important;height:auto!important;color:var(--muted)!important;font-size:12px!important}
+.ucm-import button,.ucm-import .upload-container{background:var(--bg)!important;
+  border:1.5px dashed var(--line-2)!important;border-radius:12px!important;padding:10px 14px!important;
+  box-shadow:none!important;color:var(--muted-2)!important}
+.gradio-container .container.show_textbox_border,.gradio-container .input-container{background:transparent!important}
 
-/* ===================== Hero ===================== */
-.ucm-hero{position:relative;overflow:hidden;border-radius:20px;padding:30px 34px;color:#fff;margin:6px 0 18px;
-  background:linear-gradient(118deg,#071523 0%,#0b2a4a 46%,#0d5060 84%,#0f7a6d 108%);
-  box-shadow:var(--shadow-lg)}
-.ucm-hero::before{content:"";position:absolute;inset:0;opacity:.5;pointer-events:none;
-  background:
-   radial-gradient(520px 220px at 82% 120%, rgba(18,181,160,.32), transparent 70%),
-   radial-gradient(420px 200px at 96% -20%, rgba(59,130,246,.25), transparent 70%)}
-.ucm-hero::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.14;
-  background:repeating-linear-gradient(135deg,transparent 0 22px,rgba(255,255,255,.5) 22px 23px)}
-.ucm-hero>*{position:relative;z-index:1}
-.ucm-hero .eyebrow{font-size:11px;letter-spacing:.24em;color:#7fe3d4!important;font-weight:700;
-  display:inline-flex;align-items:center;gap:8px}
-.ucm-hero .eyebrow::before{content:"";width:22px;height:2px;border-radius:2px;background:#12b5a0}
-.ucm-hero h1{margin:10px 0 6px;font-size:29px;line-height:1.25;font-weight:760;color:#fff!important}
-.ucm-hero p{margin:0;color:#c9dcf0!important;font-size:13.5px;max-width:56em}
-.ucm-hero .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-.ucm-chip{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.2);border-radius:999px;
-  padding:4px 12px;font-size:11.5px;color:#e9f7f4;backdrop-filter:blur(6px)}
-.ucm-chip b{color:#8fe8d9;font-weight:700}
-.ucm-mode-mock{background:#b45309!important;border-color:#f3d19b!important;color:#fff!important}
+/* ===================== 输入框 ===================== */
+.gradio-container input[type="text"],.gradio-container input[type="number"],.gradio-container input[type="password"],
+.gradio-container textarea{
+  border-radius:var(--radius-input)!important;border:1px solid var(--line-2)!important;
+  background:var(--card)!important;transition:box-shadow .5s var(--ease),border-color .5s var(--ease)!important}
+.gradio-container input:focus,.gradio-container textarea:focus{
+  border-color:var(--blue)!important;box-shadow:0 0 0 3px rgba(0,113,227,.22)!important;outline:none!important}
+.gradio-container input::placeholder,.gradio-container textarea::placeholder{color:#aeaeb2}
+
+/* ===================== 页头（Apple 极简：灰底大标题） ===================== */
+.ucm-hero{padding:44px 4px 4px;margin:0}
+.ucm-hero .eyebrow{font-size:12px;letter-spacing:.18em;color:var(--muted)!important;font-weight:600;
+  display:inline-flex;align-items:center;gap:10px;text-transform:uppercase}
+.ucm-hero h1{margin:10px 0 6px;font-size:34px;line-height:1.15;font-weight:700;letter-spacing:-.022em;
+  color:var(--ink)!important}
+.ucm-hero p{margin:0;color:var(--muted)!important;font-size:15px;max-width:56em;line-height:1.55}
+.ucm-hero .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.ucm-chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 13px;
+  font-size:12px;color:var(--muted-2);font-weight:500}
+.ucm-chip b{color:var(--ink);font-weight:600}
+.ucm-mode-mock{background:#fff6e0!important;border-color:#ffd9a0!important;color:#8a5300!important}
 
 /* ===================== 区块标题 ===================== */
-.ucm-section-title{margin:20px 0 10px;font-size:16px;font-weight:750;color:var(--ucm-ink);
-  display:flex;align-items:center;gap:10px}
-.ucm-section-title::before{content:"";width:4px;height:16px;border-radius:3px;
-  background:linear-gradient(180deg,#12b5a0,#0b6b63)}
-.ucm-section-title small{font-weight:400;color:var(--ucm-muted);font-size:12px;margin-left:2px}
+.ucm-section-title{margin:34px 2px 14px;font-size:21px;font-weight:700;letter-spacing:-.01em;
+  color:var(--ink);display:flex;align-items:baseline;gap:10px}
+.ucm-section-title small{font-weight:400;color:var(--muted);font-size:13px}
 
-/* ===================== 服务地址卡片 ===================== */
-.ucm-endpoint{background:var(--ucm-card);border:1px solid var(--ucm-line);border-radius:16px;
-  padding:16px 18px 8px;margin-bottom:6px;box-shadow:var(--shadow-sm)}
-.ucm-endpoint input{border-radius:10px!important}
+/* ===================== 白卡片（服务地址 / 测试项列表 / 配置） ===================== */
+.gradio-container .gr-group{background:transparent!important;border:none!important;box-shadow:none!important}
+.ucm-endpoint,.ucm-items,.ucm-config{background:var(--card)!important;border-radius:var(--radius-card);
+  box-shadow:var(--shadow-rest)!important;transition:box-shadow .5s var(--ease)}
+.ucm-endpoint{padding:24px 26px 10px;margin-bottom:8px}
+.ucm-endpoint input{border-radius:var(--radius-input)!important}
+.ucm-config{margin-top:14px}
+.ucm-config .wrap{background:transparent}
+.ucm-config summary,.ucm-config > button{font-weight:600!important;color:var(--ink)!important}
 
-/* ===================== 测试项卡片 ===================== */
-.test-card{position:relative;background:var(--ucm-card)!important;border:1px solid var(--ucm-line)!important;
-  border-radius:16px!important;padding:14px 16px!important;box-shadow:var(--shadow-sm)!important;
-  transition:box-shadow .18s ease,transform .18s ease,border-color .18s ease;overflow:hidden}
-/* 网格对齐：行内等高、内容纵向排布、按钮统一沉底 */
-.gradio-container .row:has(.test-card){display:flex!important;align-items:stretch!important}
-.gradio-container .row:has(.test-card) > .column{display:flex!important}
-.test-card{display:flex!important;flex-direction:column!important;min-height:344px!important}
-.test-card > .card-enable{position:absolute;top:12px;right:14px;z-index:2;transform:scale(.82);transform-origin:top right}
-.test-card > .card-enable label{font-size:11px!important;color:var(--ucm-muted)!important;gap:4px}
-.test-card > button{margin-top:auto!important;width:100%!important}
-.test-card .card-desc{flex:1}
-.test-card:hover{box-shadow:var(--shadow-md)!important;transform:translateY(-2px);border-color:var(--ucm-line-strong)!important}
-.test-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent,#0e9f8c);opacity:.85}
-.card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
-.card-head{display:flex;align-items:center;gap:10px;min-width:0}
-.card-icon{width:38px;height:38px;flex:none;border-radius:11px;display:flex;align-items:center;justify-content:center;
-  font-size:19px;background:color-mix(in srgb,var(--accent,#0e9f8c) 13%,#fff);border:1px solid color-mix(in srgb,var(--accent,#0e9f8c) 26%,#fff)}
-.card-title{font-weight:730;font-size:15px;margin-top:0;line-height:1.2}
-.card-eta{font-size:11px;color:var(--ucm-muted);background:#f1f5f9;border-radius:999px;padding:3px 9px;white-space:nowrap}
-.card-desc{font-size:12.5px;color:var(--ucm-muted);line-height:1.6;margin:8px 0 8px;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
-  min-height:40px!important;max-height:40px!important}
-.status-line{margin-top:2px}
-.status-summary{font-size:12px;color:var(--ucm-muted);margin-top:6px;line-height:1.5;min-height:36px}
-.test-card:has(.ucm-pill.running){border-color:#93c5fd!important;box-shadow:0 0 0 3px rgba(37,99,235,.10),var(--shadow-md)!important}
-.test-card:has(.ucm-pill.running)::after{content:"";position:absolute;left:0;right:0;top:0;height:2.5px;
-  background:linear-gradient(90deg,transparent,#3b82f6,transparent);animation:ucm-slide 1.6s linear infinite}
-@keyframes ucm-slide{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+/* ===================== 测试项列表（iOS 设置风格） ===================== */
+.ucm-items{padding:8px 24px}
+.ucm-item{padding:0!important;transition:background .5s var(--ease)}
+.ucm-item + .ucm-item{border-top:1px solid var(--line)!important}
+.ucm-item-row{display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;
+  align-items:center!important;gap:16px;margin:0!important;padding:8px 0}
+.ucm-item-row > .block,.ucm-item-row > button{min-width:0!important}
+.ucm-item-row > .ucm-item-head-wrap{flex:1 1 auto!important;width:auto!important}
+.ucm-item-row > .ucm-item-status{flex:0 0 auto!important;width:auto!important}
+.ucm-item-row > .card-enable{flex:0 0 auto!important;width:auto!important}
+.ucm-item-row > button.ucm-run-one{flex:0 0 auto!important;width:auto!important}
+.ucm-item-head-wrap{flex:1 1 auto!important;min-width:0;display:flex!important;align-items:center!important}
+.ucm-item-head{display:flex;align-items:center;gap:14px;min-width:0}
+.ucm-item-icon{width:36px;height:36px;flex:none;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;font-size:17px;
+  background:color-mix(in srgb,var(--accent,#0071e3) 12%,#fff);
+  border:1px solid color-mix(in srgb,var(--accent,#0071e3) 24%,#fff)}
+.ucm-item-name{min-width:0}
+.ucm-item-title{font-size:15px;font-weight:600;letter-spacing:-.01em;line-height:1.3;
+  display:flex;align-items:center;gap:8px;white-space:nowrap}
+.ucm-item-eta{font-size:11px;color:var(--muted);background:var(--bg);border-radius:999px;
+  padding:2px 9px;font-weight:500;white-space:nowrap}
+.ucm-item-desc{font-size:12.5px;color:var(--muted);line-height:1.5;margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:460px}
+.ucm-item-status{flex:0 0 auto!important;display:flex!important;align-items:center}
+.ucm-item-status .status-line{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+.ucm-item-status .status-summary{font-size:12px;color:var(--muted);max-width:260px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.ucm-item:has(.ucm-pill.running){background:rgba(0,113,227,.045)}
+.ucm-item:has(.ucm-pill.running) .ucm-item-icon{animation:ucm-breathe 1.6s ease-in-out infinite}
+@keyframes ucm-breathe{0%,100%{opacity:1}50%{opacity:.55}}
 
 /* ===================== 状态徽章 ===================== */
-.ucm-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 11px;
-  font-size:11.5px;font-weight:680;letter-spacing:.02em}
-.ucm-pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
-.ucm-pill.passed{color:#15803d;background:#e9f8ef;border:1px solid #b9e6c9}
-.ucm-pill.warning{color:#b45309;background:#fff7e6;border:1px solid #f2d19a}
-.ucm-pill.failed{color:#b91c1c;background:#fef1f1;border:1px solid #f3c2c2}
-.ucm-pill.pending,.ucm-pill.skipped{color:#55637a;background:#f2f5f9;border:1px solid #dde4ee}
-.ucm-pill.running{color:#1d4ed8;background:#eaf1ff;border:1px solid #bdd4fd}
+.ucm-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2.5px 11px;
+  font-size:11.5px;font-weight:600;letter-spacing:.01em;white-space:nowrap}
+.ucm-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.ucm-pill.passed{color:#1d7a3d;background:#e8f9ee}
+.ucm-pill.warning{color:#9a6a00;background:#fff6e0}
+.ucm-pill.failed{color:#c21b17;background:#ffecec}
+.ucm-pill.pending,.ucm-pill.skipped{color:var(--muted-2);background:var(--bg)}
+.ucm-pill.running{color:#0062c4;background:#e5f0ff}
 .ucm-pill.running::before{animation:ucm-pulse 1.1s ease-in-out infinite}
 @keyframes ucm-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
 
-/* ===================== 验收范围勾选（芯片化） ===================== */
-#items-check .wrap{gap:8px}
-#items-check label{border:1.5px solid var(--ucm-line-strong)!important;background:#fff!important;
-  border-radius:999px!important;padding:6px 14px!important;font-size:12.5px!important;font-weight:600!important;
-  color:var(--ucm-muted)!important;transition:all .15s ease;cursor:pointer;margin:0!important;
-  box-shadow:0 1px 2px rgba(13,26,43,.04)}
-#items-check label:hover{border-color:var(--ucm-teal)!important;color:var(--ucm-teal-deep)!important}
-#items-check label:has(input:checked){background:linear-gradient(120deg,#0b6b63,#12b5a0)!important;
-  border-color:transparent!important;color:#fff!important;box-shadow:0 3px 10px rgba(14,159,140,.32)}
-#items-check input[type="checkbox"]{accent-color:#0e9f8c}
+/* ===================== 纳入验收开关（iOS 拨动开关） ===================== */
+.card-enable{flex:0 0 auto!important;display:flex!important;align-items:center!important}
+.card-enable > div{margin:0!important}
+.card-enable label{display:inline-flex!important;align-items:center;margin:0!important;cursor:pointer;min-height:28px}
+.card-enable .label-text{display:none!important}
+.card-enable input[type="checkbox"]{appearance:none;-webkit-appearance:none;width:44px;height:26px;margin:0;
+  border-radius:999px!important;background:#e9e9eb!important;border:none!important;box-shadow:none!important;
+  cursor:pointer;transition:background .5s var(--ease);position:relative;outline:none;flex:none}
+.card-enable input[type="checkbox"]:checked{background:var(--green)!important}
+.card-enable input[type="checkbox"]::after{content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;
+  border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.18);transition:transform .5s var(--ease)}
+.card-enable input[type="checkbox"]:checked::after{transform:translateX(18px)}
 
-/* ===================== 配置面板 ===================== */
-.ucm-config{background:var(--ucm-card);border:1px solid var(--ucm-line);border-radius:16px;
-  box-shadow:var(--shadow-sm);margin-top:14px}
-.ucm-config .wrap{background:transparent}
-.ucm-config summary,.ucm-config > button{font-weight:700!important;color:var(--ucm-ink)!important}
-.ucm-config .tab-nav,.gradio-container .tab-nav{background:transparent!important;border-bottom:1px solid var(--ucm-line)}
-.ucm-config .tab-nav button,.gradio-container .tab-nav button{border-radius:10px 10px 0 0!important;
-  font-weight:620!important;font-size:13px!important;color:var(--ucm-muted)!important}
+/* ===================== 按钮系统（胶囊） ===================== */
+.gradio-container button.primary{background:var(--blue)!important;border:none!important;color:#fff!important;
+  border-radius:999px!important;font-weight:600!important;box-shadow:var(--shadow-btn)!important;
+  transition:all .5s var(--ease)}
+.gradio-container button.primary:hover{background:var(--blue-hover)!important;transform:translateY(-1px)}
+.gradio-container button.primary:active{transform:scale(.96)}
+.gradio-container button.secondary{background:var(--card)!important;color:var(--blue)!important;
+  border:1px solid var(--line-2)!important;border-radius:999px!important;font-weight:600!important;
+  transition:all .5s var(--ease)}
+.gradio-container button.secondary:hover{background:var(--bg)!important;transform:translateY(-1px)}
+.gradio-container button.secondary:active{transform:scale(.96)}
+.run-all{min-height:48px!important;font-size:15px!important;letter-spacing:-.01em;padding:0 40px!important}
+.ucm-run-one{min-height:32px!important;font-size:12.5px!important;padding:0 18px!important;
+  background:var(--blue-soft)!important;border:none!important;color:var(--blue)!important}
+.ucm-run-one:hover{background:rgba(0,113,227,.16)!important;transform:none}
+.probe-btn{min-height:40px!important}
+
+/* ===================== 选项卡（分段控件） ===================== */
+.ucm-config .tab-nav,.gradio-container .tab-nav{background:#ececee!important;border-bottom:none!important;
+  border-radius:12px!important;padding:3px!important;gap:2px;width:fit-content}
+.ucm-config .tab-nav button,.gradio-container .tab-nav button{border-radius:9px!important;background:transparent!important;
+  font-weight:500!important;font-size:13px!important;color:var(--muted-2)!important;
+  transition:all .5s var(--ease)}
 .ucm-config .tab-nav button.selected,.gradio-container .tab-nav button.selected,
-.ucm-config .tab-nav button[aria-selected="true"]{color:var(--ucm-teal-deep)!important;
-  box-shadow:inset 0 -2px 0 var(--ucm-teal)}
-.ucm-config .form{gap:8px}
-.ucm-ds-table{margin:6px 0 2px;overflow-x:auto}
-.ucm-ds-table table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;
-  border:1px solid var(--ucm-line);border-radius:10px;overflow:hidden}
-.ucm-ds-table th{background:#f4f7fb;color:#3d4c63;font-weight:640;text-align:left;
-  padding:7px 10px;border-bottom:1px solid var(--ucm-line);white-space:nowrap}
-.ucm-ds-table td{padding:7px 10px;border-bottom:1px solid var(--ucm-line);color:#2b3852;vertical-align:top}
-.ucm-ds-table tr:last-child td{border-bottom:none}
-.ucm-ds-table .ds-key{font-size:10.5px;color:#8a95a9;font-family:Consolas,monospace}
-.ucm-ds-table .ds-desc{color:var(--ucm-muted);max-width:340px}
-.ucm-ds-table .ds-src{color:#8a95a9;white-space:nowrap}
-.ucm-config label span{font-weight:600!important;font-size:12px!important;color:#43506a!important}
-.ucm-config input,.ucm-config input[type="number"],.ucm-config textarea{border-radius:10px!important}
-.ucm-hint{font-size:12px;color:var(--ucm-muted);margin:2px 0 8px;line-height:1.6}
+.ucm-config .tab-nav button[aria-selected="true"]{background:#fff!important;color:var(--ink)!important;
+  box-shadow:0 1px 4px rgba(0,0,0,.10)!important}
 
-/* ===================== 按钮 ===================== */
-.gradio-container button.primary{border-radius:12px!important;font-weight:700!important}
-.gradio-container button.secondary{border-radius:12px!important;font-weight:640!important}
-.run-all{background:linear-gradient(92deg,#0b6b63 0%,#0e9f8c 55%,#14c2a8 100%)!important;border:none!important;
-  color:#fff!important;font-weight:760!important;min-height:46px!important;font-size:14.5px!important;
-  letter-spacing:.03em;box-shadow:0 8px 20px rgba(14,159,140,.34)!important}
-.run-all:hover{filter:brightness(1.05);transform:translateY(-1px)}
-.run-all:active{transform:translateY(0)}
+/* ===================== 项内配置折叠区 ===================== */
+.ucm-item-config{border:none!important;background:transparent!important;box-shadow:none!important;
+  padding:0!important;margin:0 0 8px 50px!important}
+.ucm-item-config .label-wrap,.ucm-item-config button,.ucm-item-config [role="button"]{
+  width:100%;justify-content:flex-start!important;text-align:left;padding:3px 0!important;
+  font-weight:500!important;font-size:12.5px!important;color:var(--blue)!important}
+.ucm-item-config .label-wrap .icon,.ucm-item-config button .icon{display:none!important}
+.ucm-item-config .wrap{background:transparent!important;border:none!important}
+.ucm-config label span{font-weight:500!important;font-size:12px!important;color:var(--muted-2)!important}
+.ucm-config input,.ucm-config input[type="number"],.ucm-config textarea{border-radius:var(--radius-input)!important}
+
+/* ===================== 数据集表格 ===================== */
+.ucm-ds-table{margin:6px 0 2px;overflow-x:auto}
+.ucm-ds-table table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;
+  border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.ucm-ds-table th{background:var(--bg);color:var(--muted-2);font-weight:600;text-align:left;
+  padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.ucm-ds-table td{padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink);vertical-align:top}
+.ucm-ds-table tr:last-child td{border-bottom:none}
+.ucm-ds-table .ds-key{font-size:10.5px;color:var(--muted);font-family:"SF Mono",ui-monospace,Consolas,monospace}
+.ucm-ds-table .ds-desc{color:var(--muted);max-width:340px}
+.ucm-ds-table .ds-src{color:var(--muted);white-space:nowrap}
 
 /* ===================== 结论与日志 ===================== */
-.ucm-summary{position:relative;background:var(--ucm-card);border:1px solid var(--ucm-line);border-left:5px solid #0e9f8c;
-  border-radius:14px;padding:16px 20px;margin:4px 0 10px;box-shadow:var(--shadow-sm)}
-.ucm-summary .label{font-size:10.5px;color:var(--ucm-muted);letter-spacing:.14em;font-weight:700}
-.ucm-summary .verdict{font-size:26px;font-weight:800;line-height:1.25;margin-top:2px}
-.ucm-summary ul{margin:8px 0 0;padding-left:20px;color:var(--ucm-muted);font-size:12.5px;line-height:1.7}
-.ucm-summary .meta{font-size:11.5px;color:var(--ucm-muted);margin-top:8px;opacity:.85}
-.ucm-log textarea{font-family:"Cascadia Code","SFMono-Regular",Consolas,"JetBrains Mono",monospace!important;
-  font-size:12px!important;line-height:1.55!important;background:#0c1524!important;color:#c8dcf5!important;
-  border:1px solid #1d2c45!important;border-radius:12px!important;
-  box-shadow:inset 0 2px 10px rgba(0,0,0,.35)}
-.ucm-report-frame{width:100%;height:820px;border:1px solid var(--ucm-line);border-radius:14px;background:#fff;
-  box-shadow:var(--shadow-sm)}
-.ucm-probe-ok{color:#15803d;font-size:12.5px;margin-top:2px}
-.ucm-probe-bad{color:#b91c1c;font-size:12.5px;margin-top:2px}
-.ucm-footer{text-align:center;color:#8090a6;font-size:11.5px;padding:20px 0 8px}
+.ucm-summary{position:relative;background:var(--card);border:none!important;border-radius:var(--radius-card);
+  padding:22px 26px;margin:4px 0 10px;box-shadow:var(--shadow-rest)}
+.ucm-summary .label{font-size:11px;color:var(--muted);letter-spacing:.12em;font-weight:600}
+.ucm-summary .verdict{font-size:28px;font-weight:700;letter-spacing:-.02em;line-height:1.2;margin-top:4px}
+.ucm-summary ul{margin:8px 0 0;padding-left:20px;color:var(--muted-2);font-size:12.5px;line-height:1.7}
+.ucm-summary .meta{font-size:11.5px;color:var(--muted);margin-top:8px;opacity:.9}
+.ucm-log textarea{
+  font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,"JetBrains Mono",monospace!important;
+  font-size:12px!important;line-height:1.55!important;background:var(--bg)!important;color:var(--ink)!important;
+  border:1px solid var(--line)!important;border-radius:12px!important;box-shadow:none!important}
+.ucm-report-frame{width:100%;height:820px;border:1px solid var(--line);border-radius:16px;background:#fff;
+  box-shadow:var(--shadow-rest)}
+.ucm-probe-ok{color:#1d7a3d;font-size:12.5px;margin-top:4px}
+.ucm-probe-bad{color:#c21b17;font-size:12.5px;margin-top:4px}
+.ucm-hint{font-size:12px;color:var(--muted);margin:2px 0 8px;line-height:1.6}
+.ucm-footer{text-align:center;color:var(--muted);font-size:11.5px;padding:24px 0 8px}
+
+/* ===================== 动效偏好 ===================== */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important}
+}
 """
 
 
@@ -210,7 +239,7 @@ def _status_html(service: AcceptanceService, key: str, report: AcceptanceReport 
     report = report or service.current_report()
     item = report.items.get(key) if report else None
     if item is None:
-        return '<div class="status-line"><span class="ucm-pill pending">○ 待执行</span><div class="status-summary">尚未执行</div></div>'
+        return '<div class="status-line"><span class="ucm-pill pending">待执行</span></div>'
     summary = item.summary or item.error or "—"
     if item.status == Status.RUNNING:
         summary = "执行中…"
@@ -245,8 +274,8 @@ def _report_frame(service: AcceptanceService) -> str:
     path = service.report_path()
     if not path:
         return (
-            '<div style="border:1px dashed #cbd5e1;border-radius:12px;padding:36px;text-align:center;'
-            'color:#64748b;background:#fbfdff">执行测试后，这里会显示完整验收报告。</div>'
+            '<div style="border:1px solid #e8e8ed;border-radius:16px;padding:48px;text-align:center;'
+            'color:#86868b;background:#ffffff;font-size:13.5px">执行测试后，这里会显示完整验收报告。</div>'
         )
     try:
         content = path.read_text(encoding="utf-8")
@@ -398,13 +427,13 @@ def _parse_scenario(value: str) -> str:
     return {"对话": "dialogue", "代码": "code", "办公": "office"}.get(value, value or "dialogue")
 
 
-# 每个测试项的主题色（卡片左侧色条 + 图标徽章）
+# 每个测试项的图标色（iOS 设置风格：彩色小方块图标，页面其余部分保持单色系）
 ITEM_ACCENTS: dict[str, str] = {
-    "perf": "#2563eb",
-    "multiturn": "#7c3aed",
-    "sla": "#d97706",
-    "accuracy": "#059669",
-    "agent": "#0891b2",
+    "perf": "#0071e3",
+    "multiturn": "#af52de",
+    "sla": "#ff9500",
+    "accuracy": "#34c759",
+    "agent": "#30b0c7",
 }
 
 
@@ -535,7 +564,7 @@ def build_demo(service: AcceptanceService):
     config = service.config
     mode_text = "EvalScope 实机" if service.mode == "live" else "模拟演示（不会产生真实请求）"
     mode_class = "" if service.mode == "live" else " ucm-mode-mock"
-    theme = gr.themes.Soft(primary_hue="teal", neutral_hue="slate")
+    theme = gr.themes.Soft(primary_hue="blue", neutral_hue="slate")
 
     # 内置 tokenizer 候选
     try:
@@ -555,12 +584,12 @@ def build_demo(service: AcceptanceService):
         gr.HTML(
             f"""
             <div class="ucm-hero">
-              <div class="eyebrow">UCM INFERENCE ACCELERATION · ACCEPTANCE</div>
+              <div class="eyebrow">UCM Inference Acceleration · Acceptance</div>
               <h1>{_esc(config.get('app.title'))}</h1>
               <p>{_esc(config.get('app.subtitle'))}</p>
               <div class="chips">
-                <span class="ucm-chip{mode_class}">执行引擎：{_esc(mode_text)}</span>
-                <span class="ucm-chip">底层：EvalScope 原生 perf / eval / AgentX</span>
+                <span class="ucm-chip{mode_class}">执行引擎 · {_esc(mode_text)}</span>
+                <span class="ucm-chip">EvalScope 原生执行</span>
                 <span class="ucm-chip">离线可用 · 报告自包含</span>
                 <span class="ucm-chip">v{_esc(__version__)}</span>
               </div>
@@ -575,7 +604,7 @@ def build_demo(service: AcceptanceService):
                     label="服务地址",
                     value=str(config.get("endpoint.base_url")),
                     placeholder="http://127.0.0.1:8801/v1",
-                    scale=3,
+                    scale=4,
                 )
                 model = gr.Textbox(
                     label="模型名称",
@@ -589,27 +618,26 @@ def build_demo(service: AcceptanceService):
                     type="password",
                     scale=2,
                 )
+                probe_btn = gr.Button("检测连通", variant="secondary", scale=0, elem_classes="probe-btn")
             with gr.Row():
                 tokenizer_mode = gr.Radio(
                     choices=tok_builtin_choices,
                     value=tok_builtin_choices[tok_default_index],
                     label="模型路径（Tokenizer）",
-                    info="「内置」来自离线资产包 tokenizers/ 目录；选「自定义路径」后填写本地路径或 ModelScope 模型 ID",
-                    scale=2,
+                    info="「内置」来自离线资产包 tokenizers/ 目录",
+                    scale=3,
                 )
                 tokenizer_custom = gr.Textbox(
                     label="自定义路径 / 模型 ID",
                     value="" if builtin_match else tok_path,
                     placeholder="/opt/ucm-assets/tokenizers/<模型名>",
                     visible=not builtin_tok or builtin_match is None,
-                    scale=3,
+                    scale=2,
                 )
-            with gr.Row():
-                probe_btn = gr.Button("检测连通", variant="secondary", scale=0)
-                probe_status = gr.HTML(
-                    '<div class="ucm-hint">尚未检测。点击“检测连通”验证地址、模型与上下文窗口。</div>',
-                    elem_classes="ucm-probe-status",
-                )
+            probe_status = gr.HTML(
+                '<div class="ucm-hint">尚未检测。点击“检测连通”验证地址、模型与上下文窗口。</div>',
+                elem_classes="ucm-probe-status",
+            )
 
         # ============== 验收项目：每卡片勾选 + 卡内配置 ==============
         run_items_cfg = config.run_items()
@@ -627,35 +655,36 @@ def build_demo(service: AcceptanceService):
             if bool(item.get("enabled", True))
         ]
 
+        def _item_head(key: str) -> str:
+            """测试项列表行左侧：图标 + 名称 + 预计耗时 + 一行说明。"""
+            meta = ITEM_BY_KEY[key]
+            accent = ITEM_ACCENTS[key]
+            return (
+                f'<div class="ucm-item-head">'
+                f'<div class="ucm-item-icon" style="--accent:{accent}">{meta.icon}</div>'
+                f'<div class="ucm-item-name">'
+                f'<div class="ucm-item-title">{_esc(meta.name)}<span class="ucm-item-eta">{_esc(meta.eta)}</span></div>'
+                f'<div class="ucm-item-desc">{_esc(meta.description)}</div>'
+                f"</div></div>"
+            )
+
         gr.HTML(
-            '<div class="ucm-section-title">验收项目 <small>勾选纳入验收；展开「配置」调整该项参数；单项可点「运行」</small></div>'
+            '<div class="ucm-section-title">验收项目 <small>开关决定是否纳入验收，「配置」展开单项参数，「运行」执行单项</small></div>'
         )
         status_components: dict[str, Any] = {}
         run_buttons: dict[str, Any] = {}
         card_enable: dict[str, Any] = {}
 
-        with gr.Row(equal_height=True):
-            with gr.Column(elem_classes="test-card", elem_id="card-perf"):
-                meta = ITEM_BY_KEY["perf"]
-                accent = ITEM_ACCENTS["perf"]
-                card_enable["perf"] = gr.Checkbox(value="perf" in run_items_cfg, label="纳入验收",
-                                                  show_label=False, container=False, elem_classes="card-enable")
-                gr.HTML(
-                    f"""
-                    <div class="card-top">
-                      <div class="card-head">
-                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
-                        <div>
-                          <div class="card-title">{_esc(meta.name)}</div>
-                          <div class="card-eta">{_esc(meta.eta)}</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="card-desc">{_esc(meta.description)}</div>
-                    """
-                )
-                status_components["perf"] = gr.HTML(_status_html(service, "perf"))
-                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+        with gr.Group(elem_classes="ucm-items"):
+            # ---- 基础性能 ----
+            with gr.Group(elem_classes="ucm-item", elem_id="card-perf"):
+                with gr.Row(elem_classes="ucm-item-row"):
+                    gr.HTML(_item_head("perf"), elem_classes="ucm-item-head-wrap")
+                    status_components["perf"] = gr.HTML(_status_html(service, "perf"), elem_classes="ucm-item-status")
+                    card_enable["perf"] = gr.Checkbox(value="perf" in run_items_cfg, label="纳入验收",
+                                                      show_label=False, container=False, elem_classes="card-enable")
+                    run_buttons["perf"] = gr.Button("运行", variant="secondary", size="sm", elem_classes="ucm-run-one")
+                with gr.Accordion("配置", open=False, elem_classes="ucm-item-config"):
                     perf_parallel_card = gr.Textbox(
                         label="并发梯度",
                         value=",".join(str(v) for v in config.get("perf.parallel", [20])),
@@ -670,30 +699,15 @@ def build_demo(service: AcceptanceService):
                     perf_output_len_card = gr.Number(
                         label="输出长度（tokens）", value=int(config.get("perf.max_tokens", 256)), precision=0
                     )
-                run_buttons["perf"] = gr.Button("运行", variant="secondary", size="sm")
-
-        with gr.Row(equal_height=True):
-            with gr.Column(elem_classes="test-card", elem_id="card-multiturn"):
-                meta = ITEM_BY_KEY["multiturn"]
-                accent = ITEM_ACCENTS["multiturn"]
-                card_enable["multiturn"] = gr.Checkbox(value="multiturn" in run_items_cfg, label="纳入验收",
-                                                       show_label=False, container=False, elem_classes="card-enable")
-                gr.HTML(
-                    f"""
-                    <div class="card-top">
-                      <div class="card-head">
-                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
-                        <div>
-                          <div class="card-title">{_esc(meta.name)}</div>
-                          <div class="card-eta">{_esc(meta.eta)}</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="card-desc">{_esc(meta.description)}</div>
-                    """
-                )
-                status_components["multiturn"] = gr.HTML(_status_html(service, "multiturn"))
-                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+            # ---- 多轮对话 ----
+            with gr.Group(elem_classes="ucm-item", elem_id="card-multiturn"):
+                with gr.Row(elem_classes="ucm-item-row"):
+                    gr.HTML(_item_head("multiturn"), elem_classes="ucm-item-head-wrap")
+                    status_components["multiturn"] = gr.HTML(_status_html(service, "multiturn"), elem_classes="ucm-item-status")
+                    card_enable["multiturn"] = gr.Checkbox(value="multiturn" in run_items_cfg, label="纳入验收",
+                                                           show_label=False, container=False, elem_classes="card-enable")
+                    run_buttons["multiturn"] = gr.Button("运行", variant="secondary", size="sm", elem_classes="ucm-run-one")
+                with gr.Accordion("配置", open=False, elem_classes="ucm-item-config"):
                     mt_scenarios_card = gr.CheckboxGroup(
                         choices=mt_labels,
                         value=[str(presets[k].get("label", k)) for k in presets if k in mt_selected],
@@ -705,28 +719,15 @@ def build_demo(service: AcceptanceService):
                     mt_conv_card = gr.Number(
                         label="每组会话数", value=int(config.get("multiturn.conversations", 12)), precision=0
                     )
-                run_buttons["multiturn"] = gr.Button("运行", variant="secondary", size="sm")
-            with gr.Column(elem_classes="test-card", elem_id="card-sla"):
-                meta = ITEM_BY_KEY["sla"]
-                accent = ITEM_ACCENTS["sla"]
-                card_enable["sla"] = gr.Checkbox(value="sla" in run_items_cfg, label="纳入验收",
-                                                 show_label=False, container=False, elem_classes="card-enable")
-                gr.HTML(
-                    f"""
-                    <div class="card-top">
-                      <div class="card-head">
-                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
-                        <div>
-                          <div class="card-title">{_esc(meta.name)}</div>
-                          <div class="card-eta">{_esc(meta.eta)}</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="card-desc">{_esc(meta.description)}</div>
-                    """
-                )
-                status_components["sla"] = gr.HTML(_status_html(service, "sla"))
-                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+            # ---- SLA 自动调优 ----
+            with gr.Group(elem_classes="ucm-item", elem_id="card-sla"):
+                with gr.Row(elem_classes="ucm-item-row"):
+                    gr.HTML(_item_head("sla"), elem_classes="ucm-item-head-wrap")
+                    status_components["sla"] = gr.HTML(_status_html(service, "sla"), elem_classes="ucm-item-status")
+                    card_enable["sla"] = gr.Checkbox(value="sla" in run_items_cfg, label="纳入验收",
+                                                     show_label=False, container=False, elem_classes="card-enable")
+                    run_buttons["sla"] = gr.Button("运行", variant="secondary", size="sm", elem_classes="ucm-run-one")
+                with gr.Accordion("配置", open=False, elem_classes="ucm-item-config"):
                     sla_mode_card = gr.Radio(
                         choices=[
                             ("auto_tune（原生 P90，推荐）", "auto_tune"),
@@ -746,30 +747,15 @@ def build_demo(service: AcceptanceService):
                     sla_conc_card = gr.Number(
                         label="目标并发", value=int(config.get("sla.target.concurrency", 200)), precision=0
                     )
-                run_buttons["sla"] = gr.Button("运行", variant="secondary", size="sm")
-
-        with gr.Row(equal_height=True):
-            with gr.Column(elem_classes="test-card", elem_id="card-accuracy"):
-                meta = ITEM_BY_KEY["accuracy"]
-                accent = ITEM_ACCENTS["accuracy"]
-                card_enable["accuracy"] = gr.Checkbox(value="accuracy" in run_items_cfg, label="纳入验收",
-                                                      show_label=False, container=False, elem_classes="card-enable")
-                gr.HTML(
-                    f"""
-                    <div class="card-top">
-                      <div class="card-head">
-                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
-                        <div>
-                          <div class="card-title">{_esc(meta.name)}</div>
-                          <div class="card-eta">{_esc(meta.eta)}</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="card-desc">{_esc(meta.description)}</div>
-                    """
-                )
-                status_components["accuracy"] = gr.HTML(_status_html(service, "accuracy"))
-                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+            # ---- 模型精度 ----
+            with gr.Group(elem_classes="ucm-item", elem_id="card-accuracy"):
+                with gr.Row(elem_classes="ucm-item-row"):
+                    gr.HTML(_item_head("accuracy"), elem_classes="ucm-item-head-wrap")
+                    status_components["accuracy"] = gr.HTML(_status_html(service, "accuracy"), elem_classes="ucm-item-status")
+                    card_enable["accuracy"] = gr.Checkbox(value="accuracy" in run_items_cfg, label="纳入验收",
+                                                          show_label=False, container=False, elem_classes="card-enable")
+                    run_buttons["accuracy"] = gr.Button("运行", variant="secondary", size="sm", elem_classes="ucm-run-one")
+                with gr.Accordion("配置", open=False, elem_classes="ucm-item-config"):
                     acc_datasets_card = gr.CheckboxGroup(
                         choices=acc_labels_all,
                         value=acc_labels_enabled,
@@ -780,28 +766,15 @@ def build_demo(service: AcceptanceService):
                         info="默认 2 遍，用于一致性核验",
                     )
                     acc_limit_card = gr.Number(label="每项样本数（0=按预设）", value=0, precision=0)
-                run_buttons["accuracy"] = gr.Button("运行", variant="secondary", size="sm")
-            with gr.Column(elem_classes="test-card", elem_id="card-agent"):
-                meta = ITEM_BY_KEY["agent"]
-                accent = ITEM_ACCENTS["agent"]
-                card_enable["agent"] = gr.Checkbox(value="agent" in run_items_cfg, label="纳入验收",
-                                                   show_label=False, container=False, elem_classes="card-enable")
-                gr.HTML(
-                    f"""
-                    <div class="card-top">
-                      <div class="card-head">
-                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
-                        <div>
-                          <div class="card-title">{_esc(meta.name)}</div>
-                          <div class="card-eta">{_esc(meta.eta)}</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="card-desc">{_esc(meta.description)}</div>
-                    """
-                )
-                status_components["agent"] = gr.HTML(_status_html(service, "agent"))
-                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+            # ---- Agent 场景 ----
+            with gr.Group(elem_classes="ucm-item", elem_id="card-agent"):
+                with gr.Row(elem_classes="ucm-item-row"):
+                    gr.HTML(_item_head("agent"), elem_classes="ucm-item-head-wrap")
+                    status_components["agent"] = gr.HTML(_status_html(service, "agent"), elem_classes="ucm-item-status")
+                    card_enable["agent"] = gr.Checkbox(value="agent" in run_items_cfg, label="纳入验收",
+                                                       show_label=False, container=False, elem_classes="card-enable")
+                    run_buttons["agent"] = gr.Button("运行", variant="secondary", size="sm", elem_classes="ucm-run-one")
+                with gr.Accordion("配置", open=False, elem_classes="ucm-item-config"):
                     agent_ctx_card = gr.Number(
                         label="目标上下文（tokens）",
                         value=int(config.get("agent.context_required", 262144)),
@@ -813,11 +786,11 @@ def build_demo(service: AcceptanceService):
                         value=max(15, int(config.get("agent.duration_s", 900)) // 60),
                         precision=0,
                     )
-                run_buttons["agent"] = gr.Button("运行", variant="secondary", size="sm")
 
         # ============== 运行与结果 ==============
         with gr.Row():
-            run_all_btn = gr.Button("执行勾选的验收测试", elem_classes="run-all", size="lg")
+            run_all_btn = gr.Button("执行勾选的验收测试", variant="primary", size="lg",
+                                    elem_classes="run-all", scale=2)
             refresh_btn = gr.Button("查看最新报告", variant="secondary")
             pdf_btn = gr.Button("导出 PDF", variant="secondary")
 
@@ -846,7 +819,7 @@ def build_demo(service: AcceptanceService):
         # ============== 高级配置（低频项） ==============
         with gr.Accordion("⚙️ 高级配置（低频项）", open=False, elem_classes="ucm-config"):
             gr.HTML(
-                '<div class="ucm-hint">各测试项的主要参数已在上方卡片内。此处为低频高级参数，'
+                '<div class="ucm-hint">各测试项的主要参数已在上方对应测试项的「配置」内。此处为低频高级参数，'
                 "修改仅对本次会话生效，点击「保存到配置文件」后持久化。API Key 不落盘。</div>"
             )
             with gr.Tabs():
@@ -1140,15 +1113,11 @@ def build_demo(service: AcceptanceService):
 
         def run_one(
             key: str,
-            enables: Any,
-            base: str,
-            model_name: str,
-            key_value: str,
-            tokenizer_mode: str,
-            tokenizer_custom: str,
-            *fields: Any,
+            *values: Any,
             progress=gr.Progress(track_tqdm=False),  # noqa: B008 - Gradio 注入约定
         ):
+            # inputs = [State(key), *5 勾选, *run_inputs(34)]：按位置统一解包
+            enables, (base, model_name, key_value, tokenizer_mode, tokenizer_custom), fields = list(values[:5]), values[5:10], values[10:]
             logs: list[str] = []
             stage = "准备执行…"
 
@@ -1164,6 +1133,7 @@ def build_demo(service: AcceptanceService):
             try:
                 _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
             except Exception as exc:  # noqa: BLE001
+                traceback.print_exc()
                 logs.append(f"✗ 参数校验失败：{exc}")
                 return _render(logs, "参数校验失败")
             try:
@@ -1177,15 +1147,11 @@ def build_demo(service: AcceptanceService):
             return _render(logs, stage)
 
         def run_all(
-            enables: Any,
-            base: str,
-            model_name: str,
-            key_value: str,
-            tokenizer_mode: str,
-            tokenizer_custom: str,
-            *fields: Any,
+            *values: Any,
             progress=gr.Progress(track_tqdm=False),  # noqa: B008 - Gradio 注入约定
         ):
+            # inputs = [*5 勾选, *run_inputs(34)]：按位置统一解包
+            enables, (base, model_name, key_value, tokenizer_mode, tokenizer_custom), fields = list(values[:5]), values[5:10], values[10:]
             logs: list[str] = []
 
             def on_progress(event: ProgressEvent) -> None:
@@ -1198,6 +1164,7 @@ def build_demo(service: AcceptanceService):
             try:
                 keys = _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
             except Exception as exc:  # noqa: BLE001
+                traceback.print_exc()
                 logs.append(f"✗ 参数校验失败：{exc}")
                 return _render(logs, "参数校验失败")
             try:
@@ -1209,8 +1176,8 @@ def build_demo(service: AcceptanceService):
                 stage = "执行失败"
             return _render(logs, stage)
 
-        def save_click(path_value: str, enables: Any, base: str, model_name: str, key_value: str,
-                       tokenizer_mode: str, tokenizer_custom: str, *fields: Any):
+        def save_click(path_value: str, *values: Any):
+            enables, (base, model_name, key_value, tokenizer_mode, tokenizer_custom), fields = list(values[:5]), values[5:10], values[10:]
             try:
                 _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
                 target = service.config.save(path_value or _default_save_path(service.config))
@@ -1222,8 +1189,8 @@ def build_demo(service: AcceptanceService):
             except Exception as exc:  # noqa: BLE001
                 return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 保存失败：{exc}")
 
-        def export_click(enables: Any, base: str, model_name: str, key_value: str,
-                         tokenizer_mode: str, tokenizer_custom: str, *fields: Any):
+        def export_click(*values: Any):
+            enables, (base, model_name, key_value, tokenizer_mode, tokenizer_custom), fields = list(values[:5]), values[5:10], values[10:]
             try:
                 _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
                 target = service.outputs_root / "ucm-accept.export.yaml"

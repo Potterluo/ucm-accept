@@ -358,14 +358,21 @@ def _overview(report: AcceptanceReport) -> str:
             )
     endpoint = report.endpoint or {}
     mode_text = "实机验收" if report.mode == "live" else "模拟演示"
+    scope = report.selected_keys()
+    scope_text = "全部五项" if len(scope) == len(ITEM_KEYS) else "、".join(_item_name(key) for key in scope)
+    scope_cell = "" if len(scope) == len(ITEM_KEYS) else (
+        f'<div class="kv"><div class="k">执行范围</div>'
+        f'<div class="v">{esc(scope_text)}（部分执行，{len(scope)}/{len(ITEM_KEYS)} 项）</div></div>'
+    )
     return f"""
 <section class="section" id="overview">
   <h2><span class="num">01</span>验收概览</h2>
-  <p class="lead">被测服务信息、执行方式与五项测试结论。单项详情见后续章节。</p>
+  <p class="lead">被测服务信息、执行方式与各项测试结论。单项详情见后续章节。</p>
   <div class="grid">
     <div class="kv endpoint"><div class="k">服务地址</div><div class="v">{esc(endpoint.get('base_url', '—'))}</div></div>
     <div class="kv"><div class="k">模型名称</div><div class="v">{esc(endpoint.get('model', '—'))}</div></div>
     <div class="kv"><div class="k">执行方式</div><div class="v">{esc(mode_text)}</div></div>
+    {scope_cell}
     <div class="kv"><div class="k">开始时间</div><div class="v">{_time_text(report.started_at)}</div></div>
     <div class="kv"><div class="k">结束时间</div><div class="v">{_time_text(report.finished_at)}</div></div>
     <div class="kv"><div class="k">总耗时</div><div class="v">{esc(_total_duration(report))}</div></div>

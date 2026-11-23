@@ -392,38 +392,46 @@ class AcceptanceReport:
     started_at: str
     finished_at: str = ""
     items: dict[str, ItemResult] = field(default_factory=dict)
+    selected: list[str] = field(default_factory=lambda: list(ITEM_KEYS))
     conclusion: str = "未完成"
     reasons: list[str] = field(default_factory=list)
     config_snapshot: dict[str, Any] = field(default_factory=dict)
     output_dir: str = ""
-    version: str = "1.1.0"
+    version: str = "1.2.0"
     title: str = "UCM 推理加速产品验收报告"
 
     def ordered_items(self) -> list[ItemResult]:
         return sorted(self.items.values(), key=lambda item: ITEM_BY_KEY[item.key].order)
 
+    def selected_keys(self) -> list[str]:
+        """本次验收声明的测试范围；与 items 的交集参与结论计算。"""
+        keys = [key for key in (self.selected or list(ITEM_KEYS)) if key in ITEM_BY_KEY]
+        return keys or list(ITEM_KEYS)
+
     def compute_conclusion(self) -> tuple[str, list[str]]:
+        scope = self.selected_keys()
         reasons: list[str] = []
-        missing = [ITEM_BY_KEY[key].name for key in ITEM_KEYS if key not in self.items]
+        missing = [ITEM_BY_KEY[key].name for key in scope if key not in self.items]
         if missing:
             return "未完成", [f"尚未执行：{'、'.join(missing)}"]
         incomplete = [
-            item
-            for item in self.ordered_items()
-            if item.status in {Status.PENDING, Status.RUNNING, Status.SKIPPED}
+            self.items[key]
+            for key in scope
+            if self.items[key].status in {Status.PENDING, Status.RUNNING, Status.SKIPPED}
         ]
         if incomplete:
             reasons.extend(f"{item.name}未完成：{item.summary or '已取消或尚未执行'}" for item in incomplete)
             return "未完成", reasons
-        failed = [item for item in self.ordered_items() if item.status == Status.FAILED]
-        warnings = [item for item in self.ordered_items() if item.status == Status.WARNING]
+        failed = [self.items[key] for key in scope if self.items[key].status == Status.FAILED]
+        warnings = [self.items[key] for key in scope if self.items[key].status == Status.WARNING]
         if failed:
             reasons.extend(f"{item.name}未通过：{item.summary or item.error}" for item in failed)
             return "不通过", reasons
         if warnings:
             reasons.extend(f"{item.name}需关注：{item.summary}" for item in warnings)
             return "有条件通过", reasons
-        reasons.append("五项验收测试均通过，满足本次验收口径。")
+        scope_note = "五项验收测试" if len(scope) == len(ITEM_KEYS) else f"所选 {len(scope)} 项测试"
+        reasons.append(f"{scope_note}均通过，满足本次验收口径。")
         return "通过", reasons
 
     def finalize(self) -> None:
@@ -452,6 +460,7 @@ class AcceptanceReport:
             "conclusion": self.conclusion,
             "reasons": list(self.reasons),
             "items": {key: item.to_dict() for key, item in self.items.items()},
+            "selected": self.selected_keys(),
             "config_snapshot": self.config_snapshot,
             "output_dir": self.output_dir,
         }
@@ -476,11 +485,12 @@ class AcceptanceReport:
             started_at=data.get("started_at", ""),
             finished_at=data.get("finished_at", ""),
             items=items,
+            selected=[str(key) for key in (data.get("selected") or [])],
             conclusion=data.get("conclusion", "未完成"),
             reasons=list(data.get("reasons") or []),
             config_snapshot=data.get("config_snapshot") or {},
             output_dir=data.get("output_dir", ""),
-            version=data.get("version", "1.1.0"),
+            version=data.get("version", "1.2.0"),
             title=data.get("title", "UCM 推理加速产品验收报告"),
         )
 

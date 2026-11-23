@@ -522,6 +522,11 @@ def extract_score(data: Any, dataset: str) -> float | None:
                     nested = walk(value, path + [str(key)])
                     if nested is not None:
                         return nested
+                # EvalScope 1.15+：分数常位于数组内（如 metrics[0].score）
+                if isinstance(value, list):
+                    nested = walk(value, path + [str(key)])
+                    if nested is not None:
+                        return nested
         elif isinstance(node, list):
             for item in node:
                 nested = walk(item, path)
@@ -560,8 +565,17 @@ def parse_accuracy_output(root: str | Path, dataset: str, stdout: str = "") -> t
         if match:
             raw = match.group(1)
             score = _normalize_score(raw[:-1] if raw.endswith("%") else raw)
-            if raw.endswith("%") and score is not None:
-                score = score  # _normalize_score 已按百分比归一化
+            if score is not None:
+                return score, "stdout"
+    # EvalScope 1.15 汇总表行：│ qwen… │ GSM8K │ Accuracy ↑ │ main │ 5 │ 1 │ 20% │
+    # 取数据集所在行内“最后一个百分比/小数”，避免误抓 Num/Correct 等计数字段
+    for line_match in re.finditer(
+        rf"{dataset_pattern}[^\n]*(?:accuracy|score|acc)[^\n]*$", clean, re.IGNORECASE | re.MULTILINE
+    ):
+        line = line_match.group(0)
+        numbers = re.findall(r"(\d+(?:\.\d+)?)\s*%", line) or re.findall(r"(\d+\.\d+)", line)
+        if numbers:
+            score = _normalize_score(numbers[-1])
             if score is not None:
                 return score, "stdout"
     return None, ""

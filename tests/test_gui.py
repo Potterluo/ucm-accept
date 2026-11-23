@@ -30,6 +30,36 @@ def test_advanced_overrides_validation():
         )
 
 
+def test_extra_overrides_maps_dataset_labels():
+    from ucm_accept.gui import _extra_overrides
+
+    label_map = {"数学推理": "gsm8k", "工具调用": "bfcl_v3", "基础问答": "gpqa", "长文本": "longbench_v2"}
+    overrides = _extra_overrides(
+        300, 128, "random", 5,
+        2, 6, 2, 100,
+        label_map, ["数学推理", "工具调用"],
+        "AgentX-claudecode", "现场验收报告", "客户A", "张三",
+    )
+    assert overrides["endpoint"]["timeout_s"] == 300
+    assert overrides["perf"]["min_tokens"] == 128
+    assert overrides["multiturn"]["min_turns"] == 2
+    assert overrides["sla"]["auto_tune"]["upper"] == 100
+    assert overrides["agent"]["dataset_name"] == "AgentX-claudecode"
+    datasets = overrides["accuracy"]["datasets"]
+    assert datasets["gsm8k"]["enabled"] is True
+    assert datasets["gpqa"]["enabled"] is False
+    assert overrides["report"]["title"] == "现场验收报告"
+
+
+def test_keys_for_labels():
+    from ucm_accept.gui import _keys_for_labels
+    from ucm_accept.models import ITEM_BY_KEY
+
+    labels = [ITEM_BY_KEY["sla"].name, ITEM_BY_KEY["perf"].name]
+    assert _keys_for_labels(labels) == ["perf", "sla"]
+    assert _keys_for_labels([]) == []
+
+
 def test_build_demo_subprocess(tmp_path: Path):
     """Gradio keeps internal threads alive; verify construction in a child process."""
     pytest.importorskip("gradio")

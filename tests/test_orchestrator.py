@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ucm_accept.config import Config
 from ucm_accept.engine.mock import MockEngine
 from ucm_accept.models import ITEM_KEYS, Status
@@ -30,6 +32,56 @@ def test_mock_partial_report_is_incomplete(config: Config):
     orchestrator.run_item("perf")
     assert orchestrator.report.conclusion == "未完成"
     assert set(orchestrator.report.items) == {"perf"}
+
+
+def test_run_all_with_subset_keys(config: Config):
+    config.set("sla.mode", "verify")
+    orchestrator = Orchestrator(config, MockEngine(delay_ms=0))
+    report = orchestrator.run_all(["sla", "perf"])
+    assert set(report.items) == {"perf", "sla"}
+    assert report.selected == ["perf", "sla"]
+    # 结论只按所选范围计算，不会因为其它三项未跑而判“未完成”
+    assert report.conclusion == "通过"
+    data = json.loads((orchestrator.run_dir / "report.json").read_text(encoding="utf-8"))
+    assert data["selected"] == ["perf", "sla"]
+    assert data["conclusion"] == "通过"
+
+
+def test_run_all_respects_config_run_items(config: Config):
+    config.set("run.items", ["perf", "multiturn"])
+    config.set("sla.mode", "verify")
+    orchestrator = Orchestrator(config, MockEngine(delay_ms=0))
+    report = orchestrator.run_all()
+    assert set(report.items) == {"perf", "multiturn"}
+    assert report.conclusion == "通过"
+
+
+def test_run_all_subset_drops_stale_items(config: Config):
+    config.set("sla.mode", "verify")
+    orchestrator = Orchestrator(config, MockEngine(delay_ms=0))
+    orchestrator.run_all()          # 先跑全部
+    report = orchestrator.run_all(["perf", "sla"])  # 再跑子集
+    assert set(report.items) == {"perf", "sla"}
+    assert report.selected == ["perf", "sla"]
+    assert report.conclusion == "通过"
+
+
+def test_run_all_empty_keys_rejected(config: Config):
+    from ucm_accept.errors import UCMAcceptError
+
+    orchestrator = Orchestrator(config, MockEngine(delay_ms=0))
+    with pytest.raises(UCMAcceptError):
+        orchestrator.run_all([])
+
+
+def test_accuracy_respects_dataset_enabled(config: Config):
+    config.set("accuracy.datasets.gpqa.enabled", False)
+    config.set("accuracy.datasets.longbench_v2.enabled", False)
+    orchestrator = Orchestrator(config, MockEngine(delay_ms=0))
+    item = orchestrator.run_item("accuracy")
+    assert item.status == Status.PASSED
+    ran = {dataset["key"] for dataset in item.detail["datasets"]}
+    assert ran == {"gsm8k", "bfcl_v3"}
 
 
 def test_mock_degraded_profile_fails_sla(config: Config):

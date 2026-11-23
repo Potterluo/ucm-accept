@@ -269,3 +269,47 @@ def test_parse_sla_json_with_percentile_arrays(tmp_path: Path):
     assert points[0].ttft_p90_ms == 8500
     assert points[0].ttft_p99_ms == 12000
     assert points[0].tpot_p90_ms == 45
+
+
+def test_extract_score_evalscope_15_metrics_list():
+    """EvalScope 1.15 报告：分数位于 metrics 数组内。"""
+    from ucm_accept.engine.parser import extract_score
+
+    report = {
+        "schema_version": 2,
+        "name": "qwen2.5-0.5b-instruct@gsm8k",
+        "dataset_name": "gsm8k",
+        "metrics": [
+            {"num_correct": 1, "score": 0.2, "macro_score": 0.2,
+             "categories": [{"score": 0.2, "subsets": [{"score": 0.2}]}]}
+        ],
+    }
+    assert extract_score(report, "gsm8k") == 0.2
+
+
+def test_parse_accuracy_output_rich_table_row():
+    """EvalScope 1.15 汇总表格行（含全角框线字符）兜底解析。"""
+    from ucm_accept.engine.parser import parse_accuracy_output
+
+    stdout = (
+        "│ Model                 │ Dataset │ Metric     │ Subset │ Num │ Correct │ Score │\n"
+        "│ qwen2.5-0.5b-instruct │ GSM8K   │ Accuracy ↑ │ main   │   5 │       1 │ 20%   │\n"
+    )
+    score, source = parse_accuracy_output("/nonexistent", "gsm8k", stdout)
+    assert score == 0.2
+    assert source == "stdout"
+
+
+def test_builtin_multiturn_presets_are_openai_format():
+    """内置多轮预设必须为 OpenAI 消息数组（evalscope 1.15 custom_multi_turn 要求）。"""
+    import json
+    from pathlib import Path
+
+    preset_dir = Path(__file__).resolve().parents[1] / "ucm_accept" / "resources" / "datasets" / "multiturn"
+    for path in sorted(preset_dir.glob("*.jsonl")):
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            data = json.loads(line)
+            assert isinstance(data, list), f"{path.name}:{line_no} 不是消息数组"
+            assert data, f"{path.name}:{line_no} 会话为空"
+            roles = [m["role"] for m in data]
+            assert "user" in roles and "assistant" in roles, f"{path.name}:{line_no} 缺少 user/assistant"

@@ -141,3 +141,23 @@ def test_escape_api_key_in_command_log(tmp_path: Path, engine: EvalScopeEngine):
     command = (tmp_path / "perf" / "command.txt").read_text(encoding="utf-8")
     assert secret not in command
     assert "***" in command
+
+
+def test_env_injects_dataset_cache_from_asset_hub(
+    engine: EvalScopeEngine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """资产包内的 evalscope-cache 应自动注入引擎环境变量。"""
+    from ucm_accept import assets as hub
+
+    pack = tmp_path / "ucm-assets"
+    cache = pack / "evalscope-cache"
+    cache.mkdir(parents=True)
+    monkeypatch.delenv(hub.ENV_VAR, raising=False)
+    monkeypatch.delenv("EVALSCOPE_CACHE", raising=False)
+    engine.config.set("app.assets_dir", str(pack))
+    env = engine._env()
+    assert env["EVALSCOPE_CACHE"] == str(cache.resolve())
+    # 资产包缓存强制覆盖镜像内置的只读默认路径
+    monkeypatch.setenv("EVALSCOPE_CACHE", "/opt/ucm-accept/assets/evalscope-cache")
+    env2 = engine._env()
+    assert env2["EVALSCOPE_CACHE"] == str(cache.resolve())

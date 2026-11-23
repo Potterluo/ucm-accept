@@ -111,6 +111,7 @@ class AccuracyParams:
     subset: str
     limit: int
     run_index: int
+    dataset_dir: str = ""
     request_timeout_s: int = 14400
     extra_args: list[str] = field(default_factory=list)
     dataset_args: dict[str, Any] = field(default_factory=dict)

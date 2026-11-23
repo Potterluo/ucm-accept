@@ -56,6 +56,9 @@ def collect(assets_dir: Path) -> list[dict]:
         relative = path.relative_to(assets_dir)
         if relative.parts and relative.parts[0] == "wheelhouse":
             continue
+        # ModelScope/HuggingFace 数据集缓存的锁文件为合法的 0 字节产物，跳过
+        if path.name.endswith(".lock"):
+            continue
         if path.suffix == ".jsonl":
             validate_jsonl(path)
         size = path.stat().st_size
@@ -126,15 +129,51 @@ def seed_bundled(assets_dir: Path) -> None:
     print(f"已复制内置多轮预设到 {target}")
 
 
+PACK_README = """\
+UCM 统一离线资产包（一个包，所有交付形态共用）
+================================================
+
+目录结构：
+  tokenizers/<模型名>/      tokenizer 本体（目录名与 config 的 perf.tokenizer_path 对应）
+  datasets/multiturn/       多轮对话预设（覆盖包内置同名文件）
+  evalscope-cache/          EvalScope 缓存（GPQA/GSM8K/LongBench-v2/BFCL-v3/AgentX）
+  modelscope-cache/         ModelScope 缓存（与 EvalScope 缓存配套）
+  manifest.json             SHA256 清单（--check 校验）
+
+接入方式（详见 docs/offline-build.md）：
+  Docker       构建时 COPY 进镜像，或运行时 -v <本目录>:/opt/ucm-accept/assets:ro
+  deb/rpm      安装到 /opt/ucm-accept/assets（自动发现）
+  exe/tar      本目录改名 assets/ 放在可执行文件同级（自动发现）
+  wheel/手工   export UCM_ASSETS_DIR=<本目录>，或 config.yaml: app.assets_dir
+
+校验：
+  python scripts/prepare_assets.py --assets-dir <本目录> --check
+  ucm-accept --doctor        # 现场自检会校验资产包与清单
+"""
+
+
+def init_pack(assets_dir: Path) -> None:
+    """创建标准资产包骨架（不下载任何数据）。"""
+    for name in ("tokenizers", "datasets/multiturn", "evalscope-cache", "modelscope-cache"):
+        (assets_dir / name).mkdir(parents=True, exist_ok=True)
+    readme = assets_dir / "README.txt"
+    if not readme.exists():
+        readme.write_text(PACK_README, encoding="utf-8")
+    print(f"已创建资产包骨架：{assets_dir}（填入物料后执行 --assets-dir {assets_dir} 生成清单）")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="生成 / 校验 UCM 离线资产清单")
     parser.add_argument("--assets-dir", default="assets", help="资产根目录")
     parser.add_argument("--output", default="", help="manifest.json 输出路径")
     parser.add_argument("--check", action="store_true", help="按清单校验现有资产")
     parser.add_argument("--seed-bundled", action="store_true", help="复制内置多轮预设")
+    parser.add_argument("--init", action="store_true", help="创建标准资产包骨架（不下载任何数据）")
     args = parser.parse_args()
     assets_dir = Path(args.assets_dir).resolve()
     manifest = Path(args.output).resolve() if args.output else assets_dir / "manifest.json"
+    if args.init:
+        init_pack(assets_dir)
     if args.seed_bundled:
         seed_bundled(assets_dir)
     if args.check:

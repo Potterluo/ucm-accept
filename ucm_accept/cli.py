@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -58,8 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "示例：\n"
             "  ucm-accept                         # 交互式菜单（容器 / 堡垒机）\n"
-            "  ucm-accept --all                   # 无交互跑完五项并生成报告\n"
+            "  ucm-accept --all                   # 按 run.items 范围跑完并生成报告\n"
+            "  ucm-accept --items perf,sla        # 只跑基础性能 + SLA\n"
             "  ucm-accept --item perf             # 只跑基础性能\n"
+            "  ucm-accept --save-config my.yaml   # 保存当前生效配置，之后 --config my.yaml 复用\n"
             "  ucm-accept --gui                   # 启动浏览器 GUI\n"
             "  ucm-accept --doctor --probe        # 现场自检\n"
             "  ucm-accept --mock --fast --all     # 演示 / CI 虚跑\n"
@@ -70,9 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", help="覆盖服务地址，例如 http://127.0.0.1:8801/v1")
     parser.add_argument("--model", help="覆盖模型名称")
     parser.add_argument("--api-key", help="覆盖 API Key")
-    parser.add_argument("--item", choices=list(ITEM_KEYS), help="只执行指定测试项")
+    parser.add_argument("--item", choices=list(ITEM_KEYS), help="只执行单个测试项")
+    parser.add_argument(
+        "--items",
+        help="只执行指定测试项，逗号分隔，可用编号或名称，例如 perf,sla 或 1,3",
+    )
+    parser.add_argument("--save-config", help="把当前生效配置另存为 YAML 后退出（API Key 不落盘）")
     parser.add_argument("--scenario", choices=["dialogue", "code", "office"], help="多轮对话场景预设")
-    parser.add_argument("--all", action="store_true", help="顺序执行全部五项测试")
+    parser.add_argument("--all", action="store_true", help="按配置 run.items 的范围顺序执行验收")
     parser.add_argument("--sla-mode", choices=["verify", "auto_tune"], help="覆盖 SLA 模式")
     parser.add_argument("--report", help="将本次 HTML 报告另存到指定路径")
     parser.add_argument("--pdf", action="store_true", help="同时导出 PDF（需 weasyprint 或 chromium）")
@@ -96,6 +104,38 @@ def _apply_args(config: Config, args: argparse.Namespace) -> Config:
     if args.sla_mode:
         config.set("sla.mode", args.sla_mode)
     return config
+
+
+def _parse_selection(text: str) -> list[str]:
+    """把 1,3-5 / perf,sla 之类的输入解析为去重且有序的测试项列表。"""
+    tokens = [token for token in re.split(r"[,，、\s]+", str(text).strip()) if token]
+    if not tokens:
+        raise ValueError("测试项选择不能为空，例如 1,3-5 或 perf,sla")
+    picked: set[str] = set()
+    for token in tokens:
+        for part in _expand_range(token):
+            if part.isdigit():
+                index = int(part)
+                if not 1 <= index <= len(ITEM_KEYS):
+                    raise ValueError(f"测试项编号超出范围：{index}（有效 1-{len(ITEM_KEYS)}）")
+                picked.add(ITEM_KEYS[index - 1])
+            elif part.lower() in ITEM_KEYS:
+                picked.add(part.lower())
+            else:
+                known = "、".join(f"{index + 1}={key}" for index, key in enumerate(ITEM_KEYS))
+                raise ValueError(f"未知测试项：{part}（可用：{known}）")
+    ordered = [key for key in ITEM_KEYS if key in picked]
+    return ordered
+
+
+def _expand_range(token: str) -> list[str]:
+    match = re.fullmatch(r"(\d+)-(\d+)", token)
+    if not match:
+        return [token]
+    start, end = int(match.group(1)), int(match.group(2))
+    if start > end:
+        raise ValueError(f"编号区间写反：{token}（应为 起始-结束）")
+    return [str(value) for value in range(start, end + 1)]
 
 
 def _progress_printer():
@@ -205,8 +245,12 @@ def _run_noninteractive(service: AcceptanceService, args: argparse.Namespace) ->
     progress = _progress_printer()
     item_status: Status | None = None
     try:
-        if args.all:
-            report = service.run_all(progress=progress)
+        if args.items and args.item:
+            print(RED("--item 与 --items 不能同时使用"))
+            return 2
+        if args.all or args.items:
+            keys = _parse_selection(args.items) if args.items else None
+            report = service.run_all(progress=progress, keys=keys)
         else:
             item = service.run_item(
                 args.item,
@@ -238,6 +282,7 @@ def _run_noninteractive(service: AcceptanceService, args: argparse.Namespace) ->
 
 def _print_menu(service: AcceptanceService, args: argparse.Namespace) -> None:
     mode = "模拟演示（不产生真实请求）" if service.mode == "mock" else "EvalScope 实机"
+    scope = "、".join(ITEM_BY_KEY[key].short for key in service.config.run_items())
     print()
     print(BOLD("=" * 52))
     print(BOLD(f" UCM 推理加速验收工具 (CLI)  v{__version__}"))
@@ -246,11 +291,13 @@ def _print_menu(service: AcceptanceService, args: argparse.Namespace) -> None:
     print(f"服务地址: {service.config.get('endpoint.base_url')}")
     print(f"模型:     {service.config.get('endpoint.model')}")
     print(f"报告目录: {service.outputs_root}")
+    print(f"验收范围: {scope}")
     print(DIM("-" * 52))
     for key in ITEM_KEYS:
         meta = ITEM_BY_KEY[key]
         print(f" [{meta.order}] {meta.name}    {DIM(meta.eta)}")
-    print(" [A] 执行全部验收测试")
+    print(" [A] 执行所选测试项")
+    print(" [T] 选择要执行的测试项")
     print(" [R] 查看最近报告")
     print(" [S] 修改服务地址 / 模型")
     print(" [Q] 退出")
@@ -300,17 +347,27 @@ def _interactive(service: AcceptanceService, args: argparse.Namespace) -> int:
         normalized = choice.upper()
         if normalized == "Q":
             return 0
-        if normalized in {"A", "1", "2", "3", "4", "5"}:
-            key = None if normalized == "A" else ITEM_KEYS[int(normalized) - 1]
+        looks_like_selection = bool(re.search(r"\d", choice)) or any(
+            token in choice.lower() for token in ITEM_KEYS
+        )
+        if normalized == "A" or looks_like_selection:
+            if normalized == "A":
+                keys = service.config.run_items()
+            else:
+                try:
+                    keys = _parse_selection(choice)
+                except ValueError as exc:
+                    print(RED(str(exc)))
+                    continue
             scenario = None
-            if key == "multiturn":
+            if "multiturn" in keys and len(keys) == 1:
                 scenario = _choose_scenario(str(service.config.get("multiturn.scenario", "dialogue")))
             try:
-                if key is None:
-                    report = service.run_all(progress=progress)
-                else:
-                    service.run_item(key, scenario=scenario, progress=progress)
+                if len(keys) == 1:
+                    service.run_item(keys[0], scenario=scenario, progress=progress)
                     report = service.current_report()
+                else:
+                    report = service.run_all(keys=keys, progress=progress)
                 if report is not None:
                     _print_report_summary(report, service.report_path())
             except KeyboardInterrupt:
@@ -326,6 +383,21 @@ def _interactive(service: AcceptanceService, args: argparse.Namespace) -> int:
                 input(DIM("按回车返回菜单…"))
             except EOFError:
                 return 0
+        elif normalized == "T":
+            current = "、".join(str(service.config.run_items()))
+            print(DIM(f"当前范围：{current}"))
+            text = _prompt(
+                "输入要执行的测试项（如 1,3-5 / perf,sla；回车保持不变）", ""
+            )
+            if not text:
+                continue
+            try:
+                keys = _parse_selection(text)
+            except ValueError as exc:
+                print(RED(str(exc)))
+                continue
+            service.config.set("run.items", keys)
+            print(GREEN("验收范围已更新：" + "、".join(ITEM_BY_KEY[key].name for key in keys)))
         elif normalized == "R":
             _show_latest(service)
         elif normalized == "S":
@@ -337,7 +409,7 @@ def _interactive(service: AcceptanceService, args: argparse.Namespace) -> int:
             except UCMAcceptError as exc:
                 print(RED(str(exc)))
         else:
-            print(YELLOW("无效选择，请输入 1-5 / A / R / S / Q。"))
+            print(YELLOW("无效选择，请输入 1-5 / 组合（如 1,3）/ A / T / R / S / Q。"))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -352,6 +424,16 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001
         print(RED(f"加载配置失败：{exc}"))
         return 1
+
+    if args.save_config:
+        try:
+            target = config.save(args.save_config)
+            print(GREEN(f"配置已保存：{target}"))
+            print(DIM(f"下次使用：ucm-accept --config {target}"))
+            return 0
+        except OSError as exc:
+            print(RED(f"保存配置失败：{exc}"))
+            return 1
 
     if args.doctor:
         return _doctor(config, args)
@@ -368,10 +450,10 @@ def main(argv: list[str] | None = None) -> int:
             open_browser=not args.no_browser,
         )
 
-    if not (args.all or args.item):
+    if not (args.all or args.item or args.items):
         if not sys.stdin.isatty():
             parser.print_help()
-            print(RED("\n非交互环境请使用 --all 或 --item，或显式 --gui。"))
+            print(RED("\n非交互环境请使用 --all、--items 或 --item，或显式 --gui。"))
             return 2
 
     service = AcceptanceService(
@@ -380,7 +462,7 @@ def main(argv: list[str] | None = None) -> int:
         mock_profile=args.profile,
         mock_delay_ms=0 if args.fast else None,
     )
-    if args.all or args.item:
+    if args.all or args.item or args.items:
         return _run_noninteractive(service, args)
     return _interactive(service, args)
 

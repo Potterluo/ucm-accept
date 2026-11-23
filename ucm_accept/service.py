@@ -134,13 +134,18 @@ class AcceptanceService:
             self._running = False
             self._lock.release()
 
-    def run_all(self, progress: ProgressCallback | None = None) -> AcceptanceReport:
+    def run_all(
+        self,
+        progress: ProgressCallback | None = None,
+        keys: list[str] | None = None,
+    ) -> AcceptanceReport:
+        """执行验收；keys 为空时使用配置 run.items 声明的测试范围。"""
         if not self._lock.acquire(blocking=False):
             raise UCMAcceptError("已有验收任务正在执行，请等待完成")
         self._running = True
         try:
             orchestrator = self._ensure_orchestrator(progress)
-            return orchestrator.run_all()
+            return orchestrator.run_all(keys)
         finally:
             self._running = False
             self._lock.release()
@@ -174,6 +179,13 @@ class AcceptanceService:
             merged = self.config.with_overrides(overrides)
             self.config = merged
             self._reset_if_config_changed()
+
+    def replace_config(self, config: Config) -> None:
+        """整体替换会话配置（GUI 导入配置文件 / 恢复默认值时使用）。"""
+        if self._running:
+            raise UCMAcceptError("任务执行中，无法替换配置")
+        self.config = config
+        self._reset_if_config_changed()
 
     # ------------------------------------------------------------------ state
     @property

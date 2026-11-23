@@ -10,6 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import assets as assets_hub
 from .config import Config
 from .engine.base import Endpoint
 from .engine.chat import ChatClient
@@ -66,6 +67,51 @@ def _manifest_checks(config: Config) -> list[CheckResult]:
                 results.append(_fail("离线资产", f"校验和不一致：{asset.get('path')}"))
     if not missing and not mismatched:
         results.append(_ok("离线资产", f"{len(manifest.get('assets', []))} 项内置资产完整"))
+    return results
+
+
+def _asset_hub_checks(config: Config) -> list[CheckResult]:
+    """统一资产包检查：来源、manifest 校验、数据集缓存。"""
+    configured = ""
+    try:
+        configured = str(config.get("app.assets_dir", "") or "")
+    except Exception:  # noqa: BLE001 - 配置缺失时按未配置处理
+        configured = ""
+    hub = assets_hub.find_assets_root(configured or None)
+    results: list[CheckResult] = []
+    if hub is None:
+        results.append(
+            _warn(
+                "资产包",
+                "未发现统一资产包",
+                "设置 UCM_ASSETS_DIR / app.assets_dir，或将 assets/ 放在可执行文件同级；"
+                "内置多轮预设仍可用",
+            )
+        )
+        results.extend(_manifest_checks(config))
+        return results
+    results.append(_ok("资产包", assets_hub.describe(hub)))
+    total, problems = assets_hub.verify_manifest(hub)
+    if total == 0 and problems:
+        results.append(_warn("资产包清单", problems[0], "用 scripts/prepare_assets.py 生成 manifest.json"))
+    elif problems:
+        for problem in problems:
+            results.append(_fail("资产包校验", problem, "重新执行 scripts/prepare_assets.py 或补齐物料"))
+        results.append(_ok("资产包清单", f"已检查 {min(total, len(problems) + 1)}/{total} 项，其余未展示"))
+    else:
+        results.append(_ok("资产包清单", f"{total} 项资产 SHA256 校验通过"))
+    cache = assets_hub.cache_env(hub)
+    if cache:
+        detail = "；".join(f"{var}={Path(path)}" for var, path in cache.items())
+        results.append(_ok("数据集缓存", detail))
+    else:
+        results.append(
+            _warn(
+                "数据集缓存",
+                "资产包内无 evalscope-cache / modelscope-cache",
+                "精度与 Agent 数据集需在构建机预热后放入；否则 evalscope 首次运行会尝试联网下载",
+            )
+        )
     return results
 
 
@@ -137,7 +183,7 @@ def run_doctor(config: Config, *, probe: bool = False, mock: bool = False) -> li
     else:
         results.append(_warn("GUI 依赖", "未安装 gradio", "CLI 不受影响；GUI 需 pip install 'ucm-accept[gui]'"))
 
-    results.extend(_manifest_checks(config))
+    results.extend(_asset_hub_checks(config))
 
     tokenizer = str(config.get("perf.tokenizer_path", "") or "")
     if tokenizer and tokenizer.startswith(("/", "./", "../", "~")):
@@ -147,7 +193,21 @@ def run_doctor(config: Config, *, probe: bool = False, mock: bool = False) -> li
         else:
             results.append(_warn("Tokenizer", f"路径不存在：{path}", "离线包内应预置 tokenizer"))
     elif tokenizer:
-        results.append(_warn("Tokenizer", f"使用模型 ID：{tokenizer}", "离线环境需提前缓存或改为本地路径"))
+        # 模型 ID 风格（如 Qwen/Qwen2.5-0.5B-Instruct）：先尝试从资产包按名称解析
+        resolved = None
+        hub = assets_hub.find_assets_root(str(config.get("app.assets_dir", "") or "") or None)
+        if hub is not None:
+            for name in (tokenizer.split("/")[-1], str(config.get("endpoint.model", "") or "")):
+                if not name:
+                    continue
+                hit = assets_hub.resolve_in_hub(hub, name)
+                if hit is not None and hit.is_dir():
+                    resolved = hit
+                    break
+        if resolved is not None:
+            results.append(_ok("Tokenizer", f"{resolved}（资产包自动解析：{tokenizer}）"))
+        else:
+            results.append(_warn("Tokenizer", f"使用模型 ID：{tokenizer}", "离线环境需提前缓存或放入资产包 tokenizers/<模型名>/"))
 
     missing_scenarios = []
     for key, presets in (config.get("multiturn.scenarios", {}) or {}).items():

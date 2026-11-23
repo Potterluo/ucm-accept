@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.2.0 — 2026-11-22
+
+### Changed
+
+- **README 全面重写为服务人员视角**：5 分钟上手（四形态安装照抄）、命令速查表、报错/结论对照表、离线使用简明步骤；开发者内容（EvalScope 对应、构建流水线、设计原则）收敛到附录
+
+### Added
+
+- **统一离线资产包（AssetHub）**：一次构建 `ucm-assets/`（tokenizers + datasets + evalscope-cache + SHA256 清单），所有交付形态共用——Docker 烤镜像/挂载、deb/rpm 固定路径、exe 同级 `assets/`、wheel 用 `UCM_ASSETS_DIR` 或 `app.assets_dir`；tokenizer 可只写模型名自动解析；数据集缓存自动注入 EvalScope 环境变量；`--doctor` 自动发现并逐文件校验清单；`prepare_assets.py --init` 生成包骨架
+- **测试范围可配置**：新增 `run.items` 配置节；GUI 验收范围勾选框 +「执行所选测试项」按钮；CLI `--items perf,sla`（支持编号 `1,3-5`）、交互菜单多选输入与 `[T]` 范围编辑；报告结论按所选范围计算，部分执行时在报告中明确标注
+- **测试配置中心（GUI）**：全部测试参数集中在一个「测试配置」面板（性能/SLA/多轮/精度/Agent/报告信息），改完即生效；支持保存到配置文件、导出、导入 YAML、恢复默认值；API Key 不落盘
+- **精度数据集开关**：`accuracy.datasets.*.enabled`，现场可临时剔除单项数据集
+- **CLI 配置落盘**：`--save-config` 保存当前生效配置，`--config` 复用
+- **数据集注册表**：资产包 `datasets/registry.yaml` 纯配置声明新精度数据集/多轮场景（label/dataset/limit/enabled/description），GUI 数据集一览表（含描述、样本数、来源标注）自动更新；CI 增加资产包冒烟步骤
+- **离线精度数据集直读**：资产包 `modelscope-cache` 经 `--dataset-dir` 传给 evalscope，命中本地缓存时不访问 hub；离线部署清单（libgomp 版本、chat_template.jinja、缓存目录属主、ModelScope 离线变量）固化至 docs/offline-build.md
+- **prepare_assets**：跳过 ModelScope 缓存的 0 字节 `.lock` 文件（真实缓存目录校验误报）
+- **离线精度全链路跑通**（真机 `--network=none` 容器验证）：`EVALSCOPE_CACHE`/`MODELSCOPE_CACHE` 强制指向资产包（覆盖镜像内置只读路径）；ModelScope SDK snapshot 自动布置到 evalscope 工作目录（LOCAL 分支完全离线）；datasets arrow 缓存移植方案与预热流程固化至 docs/offline-build.md
+- **界面全面重设计**：统一设计系统（配色/阴影/圆角/动效）——渐变 Hero、彩色图标徽章与左侧主题色条、验收范围勾选芯片化、执行中卡片高亮扫光动画、状态徽章圆点化、终端风格日志、扁平化 Gradio 原生组件样式；更新 docs/gui-preview.png
+
+### Changed
+
+- CLI `--all` 语义：按 `run.items` 声明的范围执行（默认仍为全部五项）
+- 报告概览新增「执行范围」；部分执行时结论口径为所选测试项
+- 内置多轮预设转换为 OpenAI 消息数组格式（EvalScope 1.15 `custom_multi_turn` 实际要求；旧格式会导致 `produced no conversations`），文档注明资产包自定义多轮数据同格式
+
+### Fixed（经 llama.cpp + Qwen2.5-0.5B 真机实测发现）
+
+- `extract_score` 无法解析 EvalScope 1.15 报告——分数位于 `metrics[0].score` 数组内，walk 未递归 list 值；两遍精度全部解析失败
+- 精度文本兜底正则误抓汇总表行内的 Num/Correct 等计数字段，改为取数据集行内最后一个百分比
+
 ## 1.1.0 — 2026-11-19
 
 ### Added

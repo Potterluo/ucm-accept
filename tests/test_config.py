@@ -70,3 +70,74 @@ def test_deep_merge_lists_replace():
 def test_masked_api_key():
     cfg = Config.load(overrides={"endpoint": {"api_key": "secret-key"}})
     assert cfg.masked()["endpoint"]["api_key"] == "***"
+
+
+def test_run_items_defaults_to_all(config: Config):
+    assert config.run_items() == ["perf", "multiturn", "sla", "accuracy", "agent"]
+
+
+def test_run_items_subset_is_ordered():
+    cfg = Config.load(overrides={"run": {"items": ["sla", "perf"]}})
+    assert cfg.run_items() == ["perf", "sla"]
+
+
+def test_run_items_unknown_key_rejected():
+    with pytest.raises(ConfigError):
+        Config.load(overrides={"run": {"items": ["perf", "boom"]}})
+
+
+def test_run_items_empty_rejected():
+    with pytest.raises(ConfigError):
+        Config.load(overrides={"run": {"items": []}})
+
+
+def test_accuracy_datasets_enabled_filter(config: Config):
+    config.set("accuracy.datasets.gpqa.enabled", False)
+    enabled = config.enabled_accuracy_datasets()
+    assert "gpqa" not in enabled
+    assert set(enabled) == {"gsm8k", "longbench_v2", "bfcl_v3"}
+
+
+def test_all_datasets_disabled_rejected_when_accuracy_selected():
+    overrides = {
+        "accuracy": {
+            "datasets": {
+                key: {"enabled": False} for key in ("gpqa", "gsm8k", "longbench_v2", "bfcl_v3")
+            }
+        }
+    }
+    with pytest.raises(ConfigError):
+        Config.load(overrides=overrides)
+
+
+def test_all_datasets_disabled_ok_when_accuracy_not_selected():
+    overrides = {
+        "run": {"items": ["perf", "sla"]},
+        "accuracy": {
+            "datasets": {
+                key: {"enabled": False} for key in ("gpqa", "gsm8k", "longbench_v2", "bfcl_v3")
+            }
+        },
+    }
+    cfg = Config.load(overrides=overrides)
+    assert cfg.enabled_accuracy_datasets() == {}
+
+
+def test_save_and_reload_roundtrip(tmp_path: Path):
+    cfg = Config.load(
+        overrides={
+            "endpoint": {"api_key": "secret-key", "base_url": "http://10.1.1.1:8000/v1"},
+            "run": {"items": ["perf", "sla"]},
+            "accuracy": {"datasets": {"gpqa": {"enabled": False}}},
+        }
+    )
+    target = tmp_path / "user.yaml"
+    saved = cfg.save(target)
+    assert saved.exists()
+    text = target.read_text(encoding="utf-8")
+    assert "secret-key" not in text  # API Key 不落盘
+    reloaded = Config.load(target)
+    assert reloaded.run_items() == ["perf", "sla"]
+    assert reloaded.get("endpoint.base_url") == "http://10.1.1.1:8000/v1"
+    assert "gpqa" not in reloaded.enabled_accuracy_datasets()
+    assert reloaded.get("endpoint.api_key", "") == ""

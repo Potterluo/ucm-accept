@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .. import assets as assets_hub
 from ..config import Config
 from ..errors import AssetError, CancelledError, EvalScopeError, EvalScopeNotFound
 from ..models import (
@@ -109,6 +110,17 @@ class EvalScopeEngine(Engine):
     def _env(self) -> dict[str, str]:
         env = os.environ.copy()
         env.update(self.env_extra)
+        # 统一资产包内的数据集缓存自动注入（显式设置的环境变量 / config env 优先）
+        try:
+            hub = assets_hub.find_assets_root(
+                str(self.config.get("app.assets_dir", "") or "") or None
+            )
+        except Exception:  # noqa: BLE001 - 资产发现失败不应影响压测启动
+            hub = None
+        if hub is not None:
+            # 资产包缓存路径覆盖镜像内置默认（容器 ENV 指向只读路径时必须强制切换）
+            for var, value in assets_hub.cache_env(hub).items():
+                env[var] = value
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("EVALSCOPE_LANGUAGE", "zh")
         env.setdefault("TERM", "dumb")
@@ -181,6 +193,7 @@ class EvalScopeEngine(Engine):
         *,
         timeout_s: float,
         secret: str = "",
+        cwd: str | None = None,
     ) -> CommandResult:
         output_dir.mkdir(parents=True, exist_ok=True)
         log_path = output_dir / "evalscope.log"
@@ -204,6 +217,7 @@ class EvalScopeEngine(Engine):
             try:
                 process = subprocess.Popen(
                     argv,
+                    cwd=cwd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -534,6 +548,7 @@ class EvalScopeEngine(Engine):
                 "dataset": params.dataset,
                 "limit": params.limit,
                 "run": params.run_index,
+                "dataset_dir": params.dataset_dir,
             }
         )
         override = self._override_argv("accuracy", mapping)
@@ -554,6 +569,9 @@ class EvalScopeEngine(Engine):
         ]
         if endpoint.api_key:
             argv.extend(["--api-key", endpoint.api_key])
+        if params.dataset_dir:
+            # 资产包内数据集缓存直读本地，离线环境不访问 ModelScope hub
+            argv.extend(["--dataset-dir", params.dataset_dir])
         if params.limit and params.limit > 0:
             argv.extend(["--limit", str(params.limit)])
         dataset_args: dict[str, Any] = dict(params.dataset_args or {})
@@ -591,6 +609,7 @@ class EvalScopeEngine(Engine):
                 cancel,
                 timeout_s=max(600, int(params.request_timeout_s) + 300),
                 secret=endpoint.api_key,
+                cwd=str(output_dir),
             )
         except CancelledError:
             raise

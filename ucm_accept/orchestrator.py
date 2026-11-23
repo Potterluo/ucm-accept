@@ -7,6 +7,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from . import assets as assets_hub
 from .config import Config
 from .engine.base import (
     AccuracyParams,
@@ -161,14 +162,24 @@ class Orchestrator:
             self._busy = False
             self._lock.release()
 
-    def run_all(self) -> AcceptanceReport:
+    def run_all(self, keys: list[str] | None = None) -> AcceptanceReport:
         if not self._lock.acquire(blocking=False):
             raise UCMAcceptError("已有验收任务正在执行，请等待完成")
         try:
             self._busy = True
             self.cancel_event.clear()
-            total = len(ITEM_KEYS)
-            for index, key in enumerate(ITEM_KEYS):
+            selected = [key for key in (self.config.run_items() if keys is None else keys) if key in ITEM_BY_KEY]
+            selected = [key for key in ITEM_KEYS if key in selected]
+            if not selected:
+                raise UCMAcceptError("未选择任何测试项，无法执行")
+            self.report.selected = selected
+            # 显式指定范围时清理上次执行遗留、不在本次范围内的结果，避免旧数据混入
+            if keys is not None:
+                for key in list(self.report.items):
+                    if key not in selected:
+                        del self.report.items[key]
+            total = len(selected)
+            for index, key in enumerate(selected):
                 self._check_cancel()
                 self._overall_base = index / total
                 self._overall_span = 1 / total
@@ -466,6 +477,12 @@ class Orchestrator:
 
     # --------------------------------------------------------------- accuracy
     def _accuracy_params(self, key: str, cfg: dict[str, Any], run_index: int) -> AccuracyParams:
+        # 资产包内 ModelScope 数据集缓存 → evalscope --dataset-dir（离线直读本地）
+        try:
+            hub = assets_hub.find_assets_root(str(self.config.get("app.assets_dir", "") or "") or None)
+        except Exception:  # noqa: BLE001 - 资产发现失败不阻断精度测试
+            hub = None
+        dataset_dir = assets_hub.evalscope_dataset_dir(hub) if hub is not None else ""
         return AccuracyParams(
             key=key,
             label=str(cfg.get("label", key)),
@@ -473,13 +490,41 @@ class Orchestrator:
             subset=str(cfg.get("subset", "") or ""),
             limit=int(cfg.get("limit", self.config.get("accuracy.limit", _FALLBACK_LIMIT)) or 0),
             run_index=run_index,
+            dataset_dir=dataset_dir,
             request_timeout_s=int(self.config.get("accuracy.request_timeout_s", 14400)),
             extra_args=[str(arg) for arg in (self.config.get("accuracy.extra_args", []) or [])],
             dataset_args=dict(cfg.get("dataset_args", {}) or {}),
         )
 
+    def _stage_local_snapshot(self, run_dir: Path, dataset: str) -> None:
+        """把资产包内 ModelScope SDK snapshot 布置到精度工作目录。
+
+        evalscope 以 ``os.path.exists(dataset_id)``（相对工作目录）判断本地数据集，
+        命中后走 LOCAL 分支完全离线加载，不访问 ModelScope hub。
+        """
+        try:
+            hub = assets_hub.find_assets_root(str(self.config.get("app.assets_dir", "") or "") or None)
+        except Exception:  # noqa: BLE001 - 布置失败不阻断（联网环境可正常下载）
+            hub = None
+        if hub is None:
+            return
+        snapshot = assets_hub.find_sdk_snapshot(hub, dataset)
+        if not snapshot:
+            return
+        import os as _os
+
+        target = run_dir / dataset
+        if target.exists():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            _os.symlink(snapshot, str(target), target_is_directory=True)
+            self._emit(f"已布置本地数据集快照：{dataset}", level="info")
+        except OSError as exc:
+            self._emit(f"本地数据集快照布置失败：{exc}", level="warning")
+
     def _run_accuracy(self, item: ItemResult, *, scenario: str | None = None) -> None:
-        datasets_cfg: dict[str, Any] = self.config.get("accuracy.datasets", {}) or {}
+        datasets_cfg: dict[str, Any] = self.config.enabled_accuracy_datasets()
         runs_per_dataset = max(1, int(self.config.get("accuracy.runs", 2)))
         threshold = float(self.config.get("accuracy.stability_threshold", 0.01))
         output_dir = ensure_dir(self.raw_root / "accuracy")
@@ -507,6 +552,8 @@ class Orchestrator:
                     fraction=step / total_steps * 0.95,
                 )
                 run_dir = ensure_dir(output_dir / key / f"run{run_index}")
+                # evalscope 子进程 cwd=output_dir，相对路径数据集布置在此处
+                self._stage_local_snapshot(output_dir, dataset=str(cfg.get("dataset", key)))
                 try:
                     run = self.engine.run_accuracy(
                         self._endpoint(),
@@ -566,7 +613,7 @@ class Orchestrator:
             max_delta = max((dataset.delta or 0.0) for dataset in detail.datasets)
             item.status = Status.PASSED
             item.summary = (
-                f"四项精度完成；KVCache 一致性正常，最大两遍偏差 {max_delta * 100:.2f}pp"
+                f"{len(detail.datasets)} 项精度完成；KVCache 一致性正常，最大两遍偏差 {max_delta * 100:.2f}pp"
             )
         detail.note = (
             "每项默认执行两遍；偏差越小，说明 KVCache 落盘/读取引入的精度损失越可控。"

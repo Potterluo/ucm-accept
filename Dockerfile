@@ -17,9 +17,10 @@ COPY ucm_accept ./ucm_accept
 COPY wheelhouse ./wheelhouse
 
 RUN if [ "${OFFLINE}" = "1" ]; then \
-      pip install --no-index --find-links=/build/wheelhouse /build "evalscope[perf,service]>=1.15,<2"; \
+      pip install --no-index --find-links=/build/wheelhouse setuptools wheel; \
+      pip install --no-build-isolation --no-index --find-links=/build/wheelhouse /build "evalscope[perf,service]>=1.15,<2"; \
       if [ "${INSTALL_AGENTX}" = "1" ]; then \
-        pip install --no-index --find-links=/build/wheelhouse "evalscope[agentx]>=1.15,<2"; \
+        pip install --no-build-isolation --no-index --find-links=/build/wheelhouse "evalscope[agentx]>=1.15,<2"; \
       fi; \
     else \
       pip install /build "evalscope[perf,service]>=1.15,<2"; \

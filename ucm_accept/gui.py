@@ -53,9 +53,16 @@ body,.gradio-container{background:var(--bg)!important}
 .ucm-import > div,.ucm-import button,.ucm-import .empty,.ucm-import .wrap,.ucm-import .upload-container,
 .ucm-import .file-preview,.ucm-import [data-testid="file"],.ucm-import .prose{
   min-height:0!important;height:auto!important;color:var(--muted)!important;font-size:12px!important}
-.ucm-import button,.ucm-import .upload-container{background:var(--bg)!important;
-  border:1.5px dashed var(--line-2)!important;border-radius:12px!important;padding:10px 14px!important;
-  box-shadow:none!important;color:var(--muted-2)!important}
+.ucm-import button,.ucm-import .upload-container{background:var(--card)!important;
+  border:1.5px dashed var(--line-2)!important;border-radius:12px!important;padding:0 16px!important;
+  box-shadow:none!important;color:var(--muted-2)!important;min-height:0!important;height:44px!important}
+.ucm-import .upload-container .wrap{flex-direction:row!important;gap:8px!important;align-items:center!important;
+  min-height:0!important;height:42px!important}
+.ucm-import .upload-container .icon-wrap svg{width:16px;height:16px}
+.ucm-import .upload-container .or{display:none!important}
+.ucm-import .upload-container .wrap{font-size:0!important}
+.ucm-import .upload-container .wrap::after{content:"选择 YAML 文件";font-size:12.5px!important;
+  color:var(--muted-2)!important;white-space:nowrap}
 .gradio-container .container.show_textbox_border,.gradio-container .input-container{background:transparent!important}
 
 /* ===================== 输入框 ===================== */
@@ -105,13 +112,13 @@ body,.gradio-container{background:var(--bg)!important}
 .ucm-item-row > .ucm-item-head-wrap{flex:1 1 auto!important;width:auto!important}
 .ucm-item-row > .ucm-item-status{flex:0 0 auto!important;width:auto!important}
 .ucm-item-row > .card-enable{flex:0 0 auto!important;width:auto!important}
-.ucm-item-row > button.ucm-run-one{flex:0 0 auto!important;width:auto!important}
+.ucm-item-row > button.ucm-run-one{flex:0 0 auto!important;width:auto!important;min-width:66px!important}
 .ucm-item-head-wrap{flex:1 1 auto!important;min-width:0;display:flex!important;align-items:center!important}
 .ucm-item-head{display:flex;align-items:center;gap:14px;min-width:0}
 .ucm-item-icon{width:36px;height:36px;flex:none;border-radius:10px;display:flex;align-items:center;
-  justify-content:center;font-size:17px;
-  background:color-mix(in srgb,var(--accent,#0071e3) 12%,#fff);
-  border:1px solid color-mix(in srgb,var(--accent,#0071e3) 24%,#fff)}
+  justify-content:center;background:var(--accent,#0071e3);color:#fff;
+  box-shadow:0 1px 3px color-mix(in srgb,var(--accent,#0071e3) 35%,transparent)}
+.ucm-item-icon svg{display:block}
 .ucm-item-name{min-width:0}
 .ucm-item-title{font-size:15px;font-weight:600;letter-spacing:-.01em;line-height:1.3;
   display:flex;align-items:center;gap:8px;white-space:nowrap}
@@ -167,26 +174,51 @@ body,.gradio-container{background:var(--bg)!important}
 .ucm-run-one{min-height:32px!important;font-size:12.5px!important;padding:0 18px!important;
   background:var(--blue-soft)!important;border:none!important;color:var(--blue)!important}
 .ucm-run-one:hover{background:rgba(0,113,227,.16)!important;transform:none}
-.probe-btn{min-height:40px!important}
+.probe-btn{min-height:40px!important;align-self:flex-end!important;margin-bottom:11px!important}
 
-/* ===================== 选项卡（分段控件） ===================== */
-.ucm-config .tab-nav,.gradio-container .tab-nav{background:#ececee!important;border-bottom:none!important;
+/* ===================== 选项芯片（radio / checkbox-group 统一胶囊） ===================== */
+.ucm-choice .wrap{gap:8px!important}
+.ucm-choice label{position:relative;border:1px solid var(--line-2)!important;border-radius:999px!important;
+  background:var(--card)!important;padding:6px 16px!important;margin:0!important;
+  font-size:12.5px!important;font-weight:500!important;color:var(--ink)!important;
+  box-shadow:none!important;cursor:pointer;transition:all .5s var(--ease)}
+.ucm-choice label:hover{border-color:var(--blue)!important}
+.ucm-choice label input{position:absolute;opacity:0;pointer-events:none;width:0;height:0;margin:0}
+.ucm-choice label.selected,.ucm-choice label:has(input:checked){
+  background:var(--blue)!important;border-color:var(--blue)!important;color:#fff!important;
+  box-shadow:0 1px 6px rgba(0,113,227,.28)!important}
+.ucm-choice label:focus-within{box-shadow:0 0 0 3px rgba(0,113,227,.22)!important}
+
+/* ===================== 文件框 / 页脚 / 日志容器 ===================== */
+.ucm-filebox{border:1px solid var(--line)!important;border-style:solid!important;border-radius:12px!important;
+  background:var(--card)!important;box-shadow:none!important}
+.ucm-filebox button{border-style:solid!important;background:var(--card)!important;color:var(--blue)!important;
+  font-size:12.5px!important}
+.gradio-container footer{display:none!important}
+.ucm-log > div,.ucm-log .wrap{background:transparent!important;border:none!important;box-shadow:none!important}
+
+/* ===================== 选项卡（分段控件，Gradio 6：.tab-container） ===================== */
+.ucm-config .tab-container:not(.visually-hidden),.gradio-container .tab-container:not(.visually-hidden){
+  background:#ececee!important;border-bottom:none!important;
   border-radius:12px!important;padding:3px!important;gap:2px;width:fit-content}
-.ucm-config .tab-nav button,.gradio-container .tab-nav button{border-radius:9px!important;background:transparent!important;
-  font-weight:500!important;font-size:13px!important;color:var(--muted-2)!important;
-  transition:all .5s var(--ease)}
-.ucm-config .tab-nav button.selected,.gradio-container .tab-nav button.selected,
-.ucm-config .tab-nav button[aria-selected="true"]{background:#fff!important;color:var(--ink)!important;
-  box-shadow:0 1px 4px rgba(0,0,0,.10)!important}
+.ucm-config .tab-container:not(.visually-hidden) button,.gradio-container .tab-container:not(.visually-hidden) button{
+  border-radius:9px!important;background:transparent!important;font-weight:500!important;
+  font-size:13px!important;color:var(--muted-2)!important;transition:all .5s var(--ease)}
+.ucm-config .tab-container:not(.visually-hidden) button.selected,
+.gradio-container .tab-container:not(.visually-hidden) button.selected,
+.ucm-config .tab-container:not(.visually-hidden) button[aria-selected="true"]{
+  background:#fff!important;color:var(--ink)!important;box-shadow:0 1px 4px rgba(0,0,0,.10)!important}
 
 /* ===================== 项内配置折叠区 ===================== */
 .ucm-item-config{border:none!important;background:transparent!important;box-shadow:none!important;
-  padding:0!important;margin:0 0 8px 50px!important}
+  padding:0!important;margin:0 0 8px 62px!important}
 .ucm-item-config .label-wrap,.ucm-item-config button,.ucm-item-config [role="button"]{
   width:100%;justify-content:flex-start!important;text-align:left;padding:3px 0!important;
   font-weight:500!important;font-size:12.5px!important;color:var(--blue)!important}
 .ucm-item-config .label-wrap .icon,.ucm-item-config button .icon{display:none!important}
 .ucm-item-config .wrap{background:transparent!important;border:none!important}
+.ucm-item-config .form{max-width:560px}
+.ucm-endpoint textarea{white-space:pre;overflow-x:auto}
 .ucm-config label span{font-weight:500!important;font-size:12px!important;color:var(--muted-2)!important}
 .ucm-config input,.ucm-config input[type="number"],.ucm-config textarea{border-radius:var(--radius-input)!important}
 
@@ -427,7 +459,22 @@ def _parse_scenario(value: str) -> str:
     return {"对话": "dialogue", "代码": "code", "办公": "office"}.get(value, value or "dialogue")
 
 
-# 每个测试项的图标色（iOS 设置风格：彩色小方块图标，页面其余部分保持单色系）
+# 每个测试项的图标（SF Symbols 风格线性 SVG）与 iOS 设置风格彩色小方块
+_SVG_WRAP = ('<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" '
+             'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{}</svg>')
+ITEM_ICONS: dict[str, str] = {
+    "perf": _SVG_WRAP.format('<path d="M12 14l4-4"/><path d="M3.4 18.5a10 10 0 1 1 17.2 0"/>'),
+    "multiturn": _SVG_WRAP.format('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
+    "sla": _SVG_WRAP.format('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/>'
+                            '<circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/>'),
+    "accuracy": _SVG_WRAP.format('<path d="M3 3v18h18"/><path d="M8 17v-4"/><path d="M13 17V8"/>'
+                                 '<path d="M18 17v-7"/>'),
+    "agent": _SVG_WRAP.format('<rect x="5" y="5" width="14" height="14" rx="2.5"/>'
+                              '<rect x="10" y="10" width="4" height="4" rx="0.8"/>'
+                              '<path d="M9 2.5V5M15 2.5V5M9 19v2.5M15 19v2.5M2.5 9H5M2.5 15H5'
+                              'M19 9h2.5M19 15h2.5"/>'),
+}
+# 图标底色（iOS 设置风格：彩色小方块图标，页面其余部分保持单色系）
 ITEM_ACCENTS: dict[str, str] = {
     "perf": "#0071e3",
     "multiturn": "#af52de",
@@ -610,7 +657,7 @@ def build_demo(service: AcceptanceService):
                     label="模型名称",
                     value=str(config.get("endpoint.model")),
                     placeholder="Qwen2.5-0.5B-Instruct",
-                    scale=2,
+                    scale=3,
                 )
                 api_key = gr.Textbox(
                     label="API Key（可选）",
@@ -624,7 +671,7 @@ def build_demo(service: AcceptanceService):
                     choices=tok_builtin_choices,
                     value=tok_builtin_choices[tok_default_index],
                     label="模型路径（Tokenizer）",
-                    info="「内置」来自离线资产包 tokenizers/ 目录",
+                    elem_classes="ucm-choice",
                     scale=3,
                 )
                 tokenizer_custom = gr.Textbox(
@@ -635,7 +682,8 @@ def build_demo(service: AcceptanceService):
                     scale=2,
                 )
             probe_status = gr.HTML(
-                '<div class="ucm-hint">尚未检测。点击“检测连通”验证地址、模型与上下文窗口。</div>',
+                '<div class="ucm-hint">「内置」来自离线资产包 tokenizers/ 目录。尚未检测，'
+                '点击“检测连通”验证地址、模型与上下文窗口。</div>',
                 elem_classes="ucm-probe-status",
             )
 
@@ -661,7 +709,7 @@ def build_demo(service: AcceptanceService):
             accent = ITEM_ACCENTS[key]
             return (
                 f'<div class="ucm-item-head">'
-                f'<div class="ucm-item-icon" style="--accent:{accent}">{meta.icon}</div>'
+                f'<div class="ucm-item-icon" style="--accent:{accent}">{ITEM_ICONS[key]}</div>'
                 f'<div class="ucm-item-name">'
                 f'<div class="ucm-item-title">{_esc(meta.name)}<span class="ucm-item-eta">{_esc(meta.eta)}</span></div>'
                 f'<div class="ucm-item-desc">{_esc(meta.description)}</div>'
@@ -712,6 +760,7 @@ def build_demo(service: AcceptanceService):
                         choices=mt_labels,
                         value=[str(presets[k].get("label", k)) for k in presets if k in mt_selected],
                         label="数据集（多选，按顺序执行）",
+                        elem_classes="ucm-choice",
                     )
                     mt_parallel_card = gr.Number(
                         label="并发", value=int(config.get("multiturn.parallel", 4)), precision=0
@@ -735,6 +784,7 @@ def build_demo(service: AcceptanceService):
                         ],
                         value=str(config.get("sla.mode", "auto_tune")),
                         label="模式",
+                        elem_classes="ucm-choice",
                     )
                     sla_ttft_card = gr.Number(
                         label="TTFT.P90 阈值（秒）",
@@ -760,6 +810,7 @@ def build_demo(service: AcceptanceService):
                         choices=acc_labels_all,
                         value=acc_labels_enabled,
                         label="数据集（多选）",
+                        elem_classes="ucm-choice",
                     )
                     acc_runs_card = gr.Number(
                         label="每项遍数", value=int(config.get("accuracy.runs", 2)), precision=0,
@@ -817,7 +868,7 @@ def build_demo(service: AcceptanceService):
         report_html = gr.HTML(_report_frame(service))
 
         # ============== 高级配置（低频项） ==============
-        with gr.Accordion("⚙️ 高级配置（低频项）", open=False, elem_classes="ucm-config"):
+        with gr.Accordion("高级配置（低频项）", open=False, elem_classes="ucm-config"):
             gr.HTML(
                 '<div class="ucm-hint">各测试项的主要参数已在上方对应测试项的「配置」内。此处为低频高级参数，'
                 "修改仅对本次会话生效，点击「保存到配置文件」后持久化。API Key 不落盘。</div>"

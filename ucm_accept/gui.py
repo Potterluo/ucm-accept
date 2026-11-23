@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import html
+import os
 import re
+import signal
 import socket
 import traceback
 from pathlib import Path
@@ -1435,6 +1437,9 @@ def main(
         mock_profile=mock_profile,
         mock_delay_ms=mock_delay_ms,
     )
+    # 页面被关闭后重开、或进程重启：自动加载输出目录里最近一次报告，恢复现场
+    if service.load_latest_report():
+        print("已加载最近一次验收报告（查看最新报告 / 验收结论区域）。")
     demo = build_demo(service)
     chosen_port = port or _find_free_port(host)
     should_open = bool(open_browser and has_desktop())
@@ -1443,6 +1448,20 @@ def main(
     if not has_desktop():
         print("未检测到桌面环境，已降级为打印访问地址；请在浏览器中手动打开。")
         should_open = False
+    # 进程被关闭（Ctrl+C / 终端关闭 / kill）时：停止当前任务、终止 EvalScope
+    # 子进程，并把已产生的结果落盘为报告（各项标记为已取消）
+    def _graceful(signum: int, _frame: Any) -> None:
+        print("\n收到退出信号，正在停止当前验收任务并保存报告…")
+        service.shutdown(timeout=10.0)
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for _sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(_sig, _graceful)
+        except (ValueError, OSError):  # noqa: BLE001 - 非主线程等场景忽略
+            pass
+
     try:
         demo.launch(
             server_name=host,
@@ -1455,6 +1474,7 @@ def main(
             css=getattr(demo, "_ucm_css", None),
         )
     except KeyboardInterrupt:
+        service.shutdown(timeout=10.0)
         return 0
     except Exception as exc:  # noqa: BLE001
         print(f"GUI 启动失败：{exc}")

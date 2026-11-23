@@ -23,65 +23,64 @@ from .models import (
 
 CSS = r"""
 :root{
-  --ink:#0f172a; --muted:#5b6779; --line:#dde3ec; --bg:#eef2f7; --card:#ffffff;
-  --brand:#0b2a4a; --brand2:#124f7a; --accent:#0f9d8a; --accent-soft:#e6f7f4;
-  --amber:#b45309; --amber-soft:#fff7e6; --red:#b91c1c; --red-soft:#fef2f2;
-  --green:#15803d; --green-soft:#eaf7ee;
+  --ink:#1d1d1f; --muted:#86868b; --line:#e8e8ed; --bg:#f5f5f7; --card:#ffffff;
+  --brand:#1d1d1f; --brand2:#0071e3; --accent:#0071e3; --accent-soft:#e5f0ff;
+  --amber:#9a6a00; --amber-soft:#fff6e0; --red:#c21b17; --red-soft:#ffecec;
+  --green:#1d7a3d; --green-soft:#e8f9ee;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--ink);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","Noto Sans CJK SC",
-  "PingFang SC","Hiragino Sans GB",sans-serif;font-size:14px;line-height:1.65}
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI","Microsoft YaHei",
+  "Noto Sans CJK SC","PingFang SC","Hiragino Sans GB",sans-serif;font-size:14px;line-height:1.65;
+  -webkit-font-smoothing:antialiased}
 a{color:var(--brand2)}
 code,pre{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace}
-.hero{background:linear-gradient(125deg,#081a30 0%,#0d3255 55%,#0f5a68 100%);color:#fff;
-  padding:34px 40px 30px;position:relative;overflow:hidden}
-.hero:after{content:"";position:absolute;right:-120px;top:-120px;width:380px;height:380px;
-  border-radius:50%;background:radial-gradient(circle,rgba(45,212,191,.28),transparent 68%)}
+.hero{background:var(--card);color:var(--ink);
+  padding:36px 40px 32px;position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
 .hero .wrap{max-width:1180px;margin:0 auto;position:relative;z-index:1}
-.eyebrow{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:#8fd8cf;font-weight:700}
-.hero h1{margin:8px 0 10px;font-size:30px;line-height:1.25;font-weight:750;letter-spacing:.01em}
-.hero .sub{color:#cfe1f2;max-width:820px;margin:0;font-size:14px}
-.hero-meta{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:18px;color:#b9cee2;font-size:12.5px}
-.hero-meta b{color:#fff;font-weight:600}
-.mode-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.25);
-  background:rgba(255,255,255,.1);border-radius:999px;padding:3px 11px;font-size:12px;color:#e6f6f3}
+.eyebrow{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.hero h1{margin:10px 0 10px;font-size:32px;line-height:1.15;font-weight:700;letter-spacing:-.02em}
+.hero .sub{color:var(--muted);max-width:820px;margin:0;font-size:14px}
+.hero-meta{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:18px;color:var(--muted);font-size:12.5px}
+.hero-meta b{color:var(--ink);font-weight:600}
+.mode-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);
+  background:var(--accent-soft);border-radius:999px;padding:3px 11px;font-size:12px;color:#0062c4}
 main{max-width:1180px;margin:0 auto;padding:24px 28px 56px}
 .banner{border-radius:12px;padding:14px 18px;margin:18px 0;border:1px solid;font-size:13.5px}
 .banner.warn{background:var(--amber-soft);border-color:#f3d19b;color:#7c4a03}
 .banner.info{background:#eff6ff;border-color:#bfdbfe;color:#1e3a8a}
 .banner strong{font-weight:700}
 .verdict{display:grid;grid-template-columns:176px 1fr;gap:24px;align-items:center;
-  background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px 28px;
-  margin-top:0;position:relative;box-shadow:0 12px 32px rgba(15,23,42,.08)}
-.verdict-badge{border-radius:12px;padding:18px 12px;text-align:center;color:#fff;
-  background:var(--accent);box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+  background:var(--card);border:none;border-radius:24px;padding:24px 28px;
+  margin-top:0;position:relative;box-shadow:0 4px 12px rgba(0,0,0,.04)}
+.verdict-badge{border-radius:16px;padding:18px 12px;text-align:center;color:#fff;
+  background:var(--accent);box-shadow:0 4px 14px rgba(0,113,227,.30)}
 .verdict-badge .label{font-size:11px;letter-spacing:.16em;opacity:.85}
 .verdict-badge .value{font-size:27px;font-weight:800;line-height:1.25;margin-top:3px}
 .verdict h2{font-size:17px;margin:0 0 6px}
 .verdict ul{margin:4px 0 0;padding-left:20px;color:var(--muted)}
 .verdict li{margin:2px 0}
-.section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 24px;
-  margin-top:20px;box-shadow:0 2px 8px rgba(15,23,42,.03);page-break-inside:avoid}
+.section{background:var(--card);border:none;border-radius:24px;padding:24px 28px;
+  margin-top:20px;box-shadow:0 4px 12px rgba(0,0,0,.04);page-break-inside:avoid}
 .section>h2{font-size:19px;margin:0 0 4px;display:flex;align-items:center;gap:9px}
-.section>h2 .num{font-size:12px;color:#fff;background:var(--brand2);border-radius:6px;
+.section>h2 .num{font-size:12px;color:#fff;background:var(--blue,#0071e3);border-radius:999px;
   min-width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-weight:700}
 .section .lead{color:var(--muted);margin:0 0 16px;font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
-.kv{border:1px solid var(--line);border-radius:11px;padding:12px 14px;background:#fbfcfe}
+.kv{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--bg)}
 .kv .k{color:var(--muted);font-size:11.5px;letter-spacing:.03em}
 .kv .v{font-weight:650;font-size:15px;margin-top:2px;overflow-wrap:anywhere}
 .kv.endpoint{grid-column:span 2}
 .kv.endpoint .v{font-size:13px}
-.metric{background:linear-gradient(180deg,#fbfdff,#f5f9ff);border:1px solid #dbe7f7;
+.metric{background:var(--bg);border:1px solid var(--line);
   border-radius:12px;padding:14px 16px}
 .metric .k{font-size:12px;color:var(--muted)}
 .metric .v{font-size:24px;font-weight:750;color:var(--brand2);margin-top:2px;line-height:1.2}
 .metric .s{font-size:11.5px;color:var(--muted);margin-top:3px}
 table{width:100%;border-collapse:collapse;margin:10px 0 2px;font-size:12.8px}
 th,td{border-bottom:1px solid var(--line);padding:8px 9px;text-align:left;vertical-align:top}
-th{background:#f6f8fc;color:#3b4b61;font-weight:650;white-space:nowrap}
+th{background:var(--bg);color:#6e6e73;font-weight:600;white-space:nowrap}
 tbody tr:last-child td{border-bottom:none}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .table-wrap{overflow-x:auto}
@@ -101,7 +100,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   border-radius:0 9px 9px 0;margin:12px 0;color:#6b4103;font-size:13px}
 .callout.bad{border-color:var(--red);background:var(--red-soft);color:#7f1d1d}
 .callout.good{border-color:var(--green);background:var(--green-soft);color:#14532d}
-.callout.info{border-color:#2563eb;background:#eff6ff;color:#1e3a8a}
+.callout.info{border-color:#0071e3;background:#e5f0ff;color:#0062c4}
 .details{border:1px solid var(--line);border-radius:10px;margin:10px 0;background:#fcfdff}
 .details summary{cursor:pointer;padding:10px 14px;font-weight:600;color:#334155}
 .details .body{padding:2px 14px 14px;border-top:1px solid var(--line)}
@@ -298,7 +297,7 @@ def svg_accuracy_bars(
         return '<div class="empty">暂无精度数据</div>'
     left, right, top, bottom = 58, 22, 18, 46
     plot_w, plot_h = width - left - right, height - top - bottom
-    colors = ["#2563eb", "#0f9d8a"]
+    colors = ["#0071e3", "#ff9500"]
     groups = len(labels)
     group_w = plot_w / max(1, groups)
     bar_w = min(30, group_w * 0.26)
@@ -472,9 +471,9 @@ def _perf_section(report: AcceptanceReport, item: ItemResult | None) -> str:
         charts = (
             '<div class="charts-2">'
             f'<div class="chart"><h3>TTFT.P90（秒）</h3><p>首字延迟随并发变化，虚线为 SLA 目标</p>'
-            f'{svg_line_chart(points, lambda p: (p.get("ttft_p90_ms") or 0) / 1000, title="TTFT.P90", unit="秒", threshold=(ttft_target / 1000 if ttft_target else None), threshold_label=f"目标 {ttft_target/1000:.1f}s" if ttft_target else "", color="#2563eb")}</div>'
+            f'{svg_line_chart(points, lambda p: (p.get("ttft_p90_ms") or 0) / 1000, title="TTFT.P90", unit="秒", threshold=(ttft_target / 1000 if ttft_target else None), threshold_label=f"目标 {ttft_target/1000:.1f}s" if ttft_target else "", color="#0071e3")}</div>'
             f'<div class="chart"><h3>TPOT.P90（毫秒）</h3><p>逐字延迟随并发变化，虚线为 SLA 目标</p>'
-            f'{svg_line_chart(points, lambda p: p.get("tpot_p90_ms"), title="TPOT.P90", unit="毫秒", threshold=tpot_target, threshold_label=f"目标 {tpot_target:.0f}ms" if tpot_target else "", color="#0f9d8a")}</div>'
+            f'{svg_line_chart(points, lambda p: p.get("tpot_p90_ms"), title="TPOT.P90", unit="毫秒", threshold=tpot_target, threshold_label=f"目标 {tpot_target:.0f}ms" if tpot_target else "", color="#ff9500")}</div>'
             "</div>"
             f'<div class="chart"><h3>输出吞吐（tok/s）</h3><p>不同并发下的稳态输出吞吐</p>'
             f'{svg_line_chart(points, lambda p: p.get("throughput_tok_s"), title="输出吞吐", unit="tok/s", color="#7c3aed")}</div>'
@@ -602,9 +601,9 @@ def _sla_section(report: AcceptanceReport, item: ItemResult | None) -> str:
             charts = (
                 '<div class="charts-2">'
                 f'<div class="chart"><h3>TTFT.P90（秒）</h3>'
-                f'{svg_line_chart(probes, lambda p: (p.get("ttft_p90_ms") or 0)/1000, title="SLA TTFT.P90", unit="秒", threshold=(target.get("ttft_p90_ms") or 0)/1000, threshold_label="目标", color="#2563eb")}</div>'
+                f'{svg_line_chart(probes, lambda p: (p.get("ttft_p90_ms") or 0)/1000, title="SLA TTFT.P90", unit="秒", threshold=(target.get("ttft_p90_ms") or 0)/1000, threshold_label="目标", color="#0071e3")}</div>'
                 f'<div class="chart"><h3>TPOT.P90（毫秒）</h3>'
-                f'{svg_line_chart(probes, lambda p: p.get("tpot_p90_ms"), title="SLA TPOT.P90", unit="毫秒", threshold=target.get("tpot_p90_ms"), threshold_label="目标", color="#0f9d8a")}</div>'
+                f'{svg_line_chart(probes, lambda p: p.get("tpot_p90_ms"), title="SLA TPOT.P90", unit="毫秒", threshold=target.get("tpot_p90_ms"), threshold_label="目标", color="#ff9500")}</div>'
                 "</div>"
             )
         recommended = detail.get("recommended_concurrency")

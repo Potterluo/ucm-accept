@@ -13,3 +13,7 @@ reports/
 *.pdf
 .env
 .DS_Store
+
+# Local offline build artifacts (populated by pip download during docker/offline builds)
+wheelhouse/*
+!wheelhouse/.gitkeep

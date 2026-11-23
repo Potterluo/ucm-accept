@@ -14,11 +14,136 @@
 | Python 运行时 | 镜像或 PyInstaller 内置 | 建议 Python 3.11（AgentX 要求 3.11–3.13） |
 | EvalScope | venv | `evalscope[perf,service]>=1.15,<2`，Agent 场景加 `[agentx]` |
 | Python wheels | `/opt/ucm-accept/wheelhouse` | `pip download` 产物，供离线重装/修复 |
-| 数据集缓存 | `/opt/ucm-accept/assets/evalscope-cache` | EvalScope / ModelScope 缓存整目录 |
-| Tokenizer | `/opt/ucm-accept/assets/tokenizers/<model>` | `config.yaml` 的 `perf.tokenizer_path` |
-| 多轮预设 | 包内置 `resources/datasets/multiturn` | 随 wheel 安装 |
+| **统一资产包** | `/opt/ucm-accept/assets` | 结构见下节；deb/rpm/容器内置，exe/tar 同级，wheel 用 `UCM_ASSETS_DIR` |
 | 配置 | `/etc/ucm-accept/config.yaml` | 所有参数外置 |
-| 资产清单 | `/opt/ucm-accept/assets/manifest.json` | SHA256 校验 |
+
+---
+
+## 一（续）、统一资产包（ucm-assets）：一次构建，处处接入
+
+**只构建一个资产包**，所有交付形态（Docker / deb / rpm / Windows exe / portable tar / wheel）共用；工具通过 AssetHub 自动发现，无需按形态改配置。
+
+### 标准目录结构
+
+```text
+ucm-assets/
+├── manifest.json                 # SHA256 清单（scripts/prepare_assets.py 生成）
+├── README.txt                    # --init 自动生成
+├── tokenizers/
+│   └── Qwen2.5-0.5B-Instruct/    # tokenizer 本体（目录名 = 模型名）
+├── datasets/
+│   └── multiturn/*.jsonl         # 多轮预设（覆盖包内置同名文件）
+├── evalscope-cache/              # EvalScope 缓存（GPQA/GSM8K/LongBench-v2/BFCL-v3/AgentX）
+└── modelscope-cache/             # ModelScope 缓存
+```
+
+### 构建（联网构建机执行一次）
+
+```bash
+# 1) 建骨架
+python scripts/prepare_assets.py --assets-dir /opt/ucm-build/ucm-assets --init --seed-bundled
+
+# 2) tokenizer 下载到 tokenizers/<模型名>/
+modelscope download --model Qwen/Qwen2.5-0.5B-Instruct \
+  --local_dir /opt/ucm-build/ucm-assets/tokenizers/Qwen2.5-0.5B-Instruct
+
+# 3) 数据集预热（缓存落到包内，见下文第 2 步的预热命令）
+export EVALSCOPE_CACHE=/opt/ucm-build/ucm-assets/evalscope-cache
+export MODELSCOPE_CACHE=/opt/ucm-build/ucm-assets/modelscope-cache
+
+# 4) 固化清单
+python scripts/prepare_assets.py --assets-dir /opt/ucm-build/ucm-assets
+```
+
+### 各交付形态的接入方式（同一个包）
+
+| 形态 | 接入 |
+|---|---|
+| Docker | 构建时 `COPY ucm-assets/ /opt/ucm-accept/assets/`；或运行时 `-v /data/ucm-assets:/opt/ucm-accept/assets:ro`（升级资产不用换镜像） |
+| deb/rpm | 安装到 `/opt/ucm-accept/assets`（固定路径，自动发现）；或把包解压到该路径 |
+| Windows exe / portable tar | 把 `ucm-assets` 目录改名为 `assets/`，与 `ucm-accept.exe` 放同级（自动发现） |
+| wheel / 手工部署 | `export UCM_ASSETS_DIR=/path/ucm-assets`，或 config.yaml：`app.assets_dir: /path/ucm-assets` |
+
+### 数据集注册表：纯配置扩展数据集与多轮场景
+
+在资产包放一个 `datasets/registry.yaml`，即可声明新的精度数据集 / 多轮场景（含描述与样本数），
+GUI 数据集一览表、勾选芯片、CLI、报告与 `--doctor` 自动生效，**无需改代码**：
+
+```yaml
+accuracy:
+  datasets:
+    customer_qa:                     # 现场自有数据集
+      label: 客户问答集
+      dataset: customer_qa           # EvalScope 数据集名（缓存需提前预热进 evalscope-cache）
+      limit: 50
+      enabled: true
+      description: 客户自有业务问答集
+multiturn:
+  scenarios:
+    telecom:
+      label: 电信客服
+      description: 电信多轮工单场景
+      dataset_path: datasets/multiturn/telecom.jsonl
+```
+
+> 多轮 JSONL 格式：每行一个 **OpenAI 消息数组**（`[{"role":"user","content":…},{"role":"assistant","content":…},…]`），
+> 与 EvalScope 1.15 `custom_multi_turn` 插件一致；assistant 内容仅作轮次边界，实际由被测模型生成。
+
+优先级：内置默认 < 注册表 < 用户 `--config`（可在用户配置中按 key 覆盖 `enabled`/`limit`）。
+GUI 重启后生效。
+
+### 离线实测清单（W2P 环境实测沉淀）
+
+以下问题在 `docker run --network=none` 纯离线容器实测中逐一暴露并已验证解决：
+
+| 问题 | 处理 |
+|---|---|
+| llama.cpp 等推理二进制缺 `libgomp.so.1`，且 host 版本依赖 GLIBC 2.38 与目标环境不匹配 | 从**目标镜像/系统同版本**提取 libgomp1 随包携带（`dpkg -x libgomp1*.deb`），LD_LIBRARY_PATH 指向 |
+| 新模型 tokenizer 目录缺 chat template（transformers 新惯例拆分为独立 `chat_template.jinja`） | 下载模型时把 `chat_template.jinja` 一并放入 `tokenizers/<模型名>/` |
+| ModelScope SDK 离线加载数据集仍先探测端点（即使缓存已存在），15s 预算耗尽抛 E1001（其提示的 `=0` 会被 `_env_int` 拒绝） | 见下方「已知限制」 |
+| 缓存/输出目录属主与容器运行用户不一致导致 Permission denied | 挂载目录预先 `chown -R 999:999`（容器 ucm 用户）或 `chmod -R a+rwX` |
+
+**离线精度（精度数据集）——已在真机离线环境跑通**，需按以下顺序固化资产包（工具已自动处理加粗步骤）：
+
+1. 联网预热 gsm8k 到 SDK snapshot 布局（ModelScope 原始文件，可移植）：
+   `modelscope download --dataset AI-ModelScope/gsm8k`（`MODELSCOPE_CACHE=<资产包>/modelscope-cache`）；
+2. 联网预热 datasets arrow 缓存到 `modelscope-cache/datasets/datasets/`（跑一次 `evalscope eval --limit 1` 即产出）；
+3. **把 arrow 目录移植到 `evalscope-cache/datasets/`**（`cp -r modelscope-cache/datasets/datasets/AI-ModelScope_gsm8k-* evalscope-cache/datasets/`）——
+   现场离线时 datasets 库直接复用该缓存（环境相关哈希在容器内一致，因为 MODELSCOPE_CACHE 指向资产包）；
+4. **工具自动完成**：运行时把 ModelScope SDK snapshot 布置到 evalscope 工作目录
+   （evalscope 以相对路径 `os.path.exists(dataset_id)` 检查本地数据集，命中走 LOCAL 分支完全离线），
+   并强制 `MODELSCOPE_CACHE`/`EVALSCOPE_CACHE` 指向资产包（覆盖镜像内置只读路径）；
+5. ModelScope 离线变量（见上表）压制联网重试为快速失败。
+
+Agent 场景数据集 `evalscope/cc-traces-weka-062126-256k` 已在 ModelScope **下线**（API 返回 record not found），
+Agent 项当前无法在任何环境准备数据集；工具会正确报告失败。数据源恢复后无需改代码，直接预热即可。
+
+**离线环境变量清单**（config.yaml `evalscope.env`，实测必要项）：
+
+```yaml
+evalscope:
+  env:
+    EVALSCOPE_LANGUAGE: zh
+    HF_DATASETS_OFFLINE: "1"      # datasets 库离线模式（命中本地缓存不联网）
+    HF_HUB_OFFLINE: "1"
+    # 以下将 ModelScope 联网重试压制为快速失败，避免 15s 探测拖慢失败路径
+    MODELSCOPE_API_CONNECT_TIMEOUT: "1"
+    MODELSCOPE_API_TIMEOUT: "1"
+    MODELSCOPE_DOWNLOAD_TOTAL_TIMEOUT: "1"
+    MODELSCOPE_DOWNLOAD_REGION_PROBE_TIMEOUT_SECONDS: "0"
+    MODELSCOPE_REPO_TREE_PAGE_TIMEOUT_SECONDS: "0"
+    MODELSCOPE_REPO_TREE_LIST_TIMEOUT_SECONDS: "0"
+```
+
+### 自动生效的三件事
+
+1. **tokenizer**：`perf.tokenizer_path` 可只写模型名（如 `Qwen2.5-0.5B-Instruct`），工具在包内 `tokenizers/` 下自动补全；写模型 ID（`Qwen/Qwen2.5-…`）也按名称尝试解析。
+2. **数据集缓存**：包内 `evalscope-cache/`、`modelscope-cache/` 自动注入 EvalScope 子进程环境变量（显式设置的环境变量优先）。
+3. **校验**：`--doctor` 自动发现资产包并按 `manifest.json` 逐文件校验 SHA256，报告来源与缺失项。
+
+> 优先级：`UCM_ASSETS_DIR` > `app.assets_dir` > exe 同级 `assets/` > `/opt/ucm-accept/assets` > 包内置 `resources/assets`。
+
+---
 
 ### 数据集来源（EvalScope 1.15 内置）
 
@@ -45,8 +170,9 @@ pip install --upgrade pip wheel
 
 mkdir -p /opt/ucm-build/wheelhouse
 pip download -d /opt/ucm-build/wheelhouse \
-  "ucm-accept==1.1.0" \
-  "evalscope[perf,service,agentx]>=1.15,<2"
+  "ucm-accept==1.2.0" \
+  "evalscope[perf,service,agentx]>=1.15,<2" \
+  "wheel" "setuptools"   # sdist 构建依赖，离线镜像安装必需
 ```
 
 如果从源码构建：
@@ -126,8 +252,8 @@ python scripts/verify_report.py /tmp/ucm-smoke/runs/*/report.json
 #### 6.1 Linux GUI / deb / rpm
 
 ```bash
-bash scripts/build_linux.sh 1.1.0 amd64
-bash scripts/build_linux.sh 1.1.0 arm64
+bash scripts/build_linux.sh 1.2.0 amd64
+bash scripts/build_linux.sh 1.2.0 arm64
 ```
 
 依赖：
@@ -141,14 +267,14 @@ bash scripts/build_linux.sh 1.1.0 arm64
 ```text
 dist/
 ├── ucm-accept-linux-amd64/          # PyInstaller onedir
-├── ucm-accept_1.1.0_amd64.deb
-└── ucm-accept-1.1.0-1.aarch64.rpm
+├── ucm-accept_1.2.0_amd64.deb
+└── ucm-accept-1.2.0-1.aarch64.rpm
 ```
 
 deb 安装后：
 
 ```bash
-sudo dpkg -i ucm-accept_1.1.0_amd64.deb
+sudo dpkg -i ucm-accept_1.2.0_amd64.deb
 ucm-accept --doctor
 ucm-accept --gui
 ```
@@ -172,7 +298,7 @@ Compress-Archive -Path dist/ucm-accept -DestinationPath dist/ucm-accept-windows-
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t registry.example.com/ucm/ucm-accept:1.1.0 \
+  -t registry.example.com/ucm/ucm-accept:1.2.0 \
   --build-arg INSTALL_AGENTX=0 \
   --push .
 ```
@@ -184,7 +310,7 @@ docker buildx build \
   --platform linux/amd64,linux/arm64 \
   --build-arg OFFLINE=1 \
   --build-arg INSTALL_AGENTX=0 \
-  -t registry.example.com/ucm/ucm-accept:1.1.0 \
+  -t registry.example.com/ucm/ucm-accept:1.2.0 \
   .
 ```
 
@@ -196,7 +322,7 @@ docker buildx build \
 docker run --rm -it \
   -v /data/ucm:/data \
   -e UCM_BASE_URL=http://172.17.0.1:8801/v1 \
-  registry.example.com/ucm/ucm-accept:1.1.0 \
+  registry.example.com/ucm/ucm-accept:1.2.0 \
   --config /etc/ucm-accept/config.yaml --outputs /data/outputs
 ```
 
@@ -207,12 +333,15 @@ docker run --rm -it \
 ### 3.1 容器（推荐，屏蔽麒麟服务器 openEuler 差异）
 
 ```bash
-docker load -i ucm-accept-1.1.0-arm64.tar
+docker load -i ucm-accept-1.2.0-arm64.tar
 docker run --rm -it \
   -v /data/ucm:/data \
-  ucm-accept:1.1.0 \
+  ucm-accept:1.2.0 \
   --config /etc/ucm-accept/config.yaml --outputs /data/outputs
 ```
+
+> **挂载目录权限**：容器内以 `ucm` 用户（uid 999）运行，宿主机挂载目录需预先授权：
+> `sudo chown -R 999:999 /data/ucm` 或 `chmod 777 /data/ucm`，否则报告目录不可写。
 
 若现场禁止 Docker，可使用 PyInstaller onedir + systemd/ssh 直接运行。
 

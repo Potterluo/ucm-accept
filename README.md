@@ -1,380 +1,251 @@
-# UCM 推理加速产品 · 客户现网验收工具
+# UCM 推理加速验收工具
 
-[![ci](https://github.com/ucm-system/ucm-accept/actions/workflows/ci.yml/badge.svg)](https://github.com/ucm-system/ucm-accept/actions/workflows/ci.yml)
-[![release](https://github.com/ucm-system/ucm-accept/actions/workflows/release.yml/badge.svg)](https://github.com/ucm-system/ucm-accept/actions/workflows/release.yml)
-[![release v1.1.0](https://img.shields.io/github/v/release/ucm-system/ucm-accept)](https://github.com/ucm-system/ucm-accept/releases)
+**给交付/服务人员的客户现网验收工具**：填一个服务地址，点一下运行，得到一份能直接交给客户的验收报告。
 
-面向交付/服务人员的**离线验收编排与呈现工具**。测试逻辑全部交给 [EvalScope](https://github.com/modelscope/evalscope)，本工具只负责：
-
-- 预设五项验收测试的参数与顺序；
-- 调用 EvalScope 原生 CLI；
-- 收集 EvalScope 原始输出；
-- 生成一份可离线归档的统一 HTML 报告；
-- 提供 GUI（浏览器）与 CLI（容器菜单）两种形态。
-
-> **设计红线**：不自行实现压测、并发搜索、精度评分或 Agent 指标算法。所有数值必须能追溯到 EvalScope 原始输出和可复现命令。
+- 被测对象：任意 OpenAI 兼容的大模型推理服务（vLLM / SGLang / TGI 等部署的服务）
+- 验收内容：基础性能、多轮对话、SLA 达标、精度一致性、Agent 长会话（五项，可选）
+- 全程离线可用：客户现场没有外网，不影响工具本身运行
+- 报告为单文件 HTML：图表、原始命令、原始数据索引全部内嵌，直接发客户
 
 ![UCM 验收工具 GUI](docs/gui-preview.png)
 
----
-
-## 一、功能与 EvalScope 对应关系
-
-| 验收项 | 默认行为 | EvalScope 原生命令 | 报告内容 |
-|---|---|---|---|
-| 基础性能 | 64K 上下文、20 并发、200 请求 | `evalscope perf` | 吞吐、TTFT/TPOT 的均值/P90/P99、总延迟、并发趋势图 |
-| 多轮对话 | 对话 / 代码 / 办公三个预设，各 12 组会话 | `evalscope perf --multi-turn --dataset custom_multi_turn` | 会话完成率、总轮次、平均延迟、KV Cache 命中 |
-| SLA 自动调优 | 64K 上下文，按 P90 搜索最高并发 | `evalscope perf --sla-auto-tune --sla-params '[{"p90_ttft":"<10000ms","p90_tpot":"<50ms"}]'` | 目标 200 并发是否达标、原生建议并发、探测点 |
-| 精度测试 | GPQA / GSM8K / LongBench-v2(short) / BFCL-v3 各跑 2 遍 | `evalscope eval --work-dir ...` | 两次得分、均值、标准差、两遍偏差、KVCache 一致性 |
-| Agent 场景 | AgentX 256K 长会话，服务级压测 | `evalscope perf --scenario agentx` | 服务级成功率、会话数、请求数、每会话请求数、降级标记 |
-
-### 已经明确砍掉的内容
-
-为了避免客户质疑“自研算法”，以下功能**不做**：
-
-1. **自研 P90 并发搜索**：EvalScope 1.15 起原生 SLA 已支持 `p90_ttft` / `p90_tpot`，直接使用 `--sla-auto-tune`。
-2. **多轮对话回放 / 工具调用轨迹展示**：EvalScope 多轮压测原生只输出统计指标，不输出可回放对话。本工具不伪造对话记录，报告中只呈现 EvalScope 指标与原始输出。
-3. **Agent 任务完成率 / 平均步数 / 工具调用成功率**：EvalScope AgentX 是**服务级**长会话压测，不是模型任务质量评测。本工具不自行计算这些任务级指标；如需请另配独立的 Agent 评测任务集。
-4. **精度分数自研计算**：只解析 EvalScope `reports/<model>/<dataset>.json` 中的原生 score；解析失败即报错，不用估算值。
-5. **PDF 强依赖**：HTML 报告可用浏览器打印为 PDF；安装 WeasyPrint 或 Chromium 后可用按钮/命令直接导出。
-
-### 两个容易混淆的口径
-
-- **SLA**：EvalScope 原生 `--sla-auto-tune` 用阈值做边界搜索，报告中的“建议并发”是 EvalScope 的搜索结果；目标并发（默认 200）是否达标，以 EvalScope 原生选择出的建议并发与目标并发比较判定；报告中同时展示 200 并发探测点（若被搜索到）。
-- **AgentX**：`submission_valid=false` 或 `mode=smoke` 的结果只能用于服务级参考，不能作为模型质量或标准 256K 验收结论。报告会显著标注。
+> 你**不需要**懂压测、懂 EvalScope、懂 Python。所有参数已按验收口径预设，照着下面三步做即可。
 
 ---
 
-## 二、快速开始
+## 一、5 分钟上手（照着做就行）
 
-### 2.1 环境要求
+### 第 0 步：确认你手里的东西
 
-- Python 3.10+（GUI/CLI 工具本体）
-- **EvalScope >= 1.15**（`p90_ttft` / `p90_tpot` 需要）
-- Agent 场景额外需要：Python 3.11–3.13、`evalscope[agentx]`、`aiperf==0.12.0`
-- 离线环境需预置：数据集、tokenizer、Python wheel 包
-
-推荐容器/服务器使用 Python 3.11。
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[gui]" "evalscope[perf,service]>=1.15,<2"
-# 需要 Agent 场景时（Python 3.11–3.13）：
-pip install "evalscope[agentx]>=1.15,<2"
-```
-
-### 2.2 不用真实模型，先走通全流程
-
-```bash
-ucm-accept --mock --fast --all --outputs ./outputs
-```
-
-报告会标注“模拟数据，不能作为验收结论”，但流程、图表、报告结构、命令追溯与实机一致。
-
-### 2.3 GUI（桌面 / 浏览器）
-
-```bash
-ucm-accept --gui --base-url http://127.0.0.1:8801/v1 --model Qwen2.5-0.5B-Instruct
-```
-
-- 启动后自动选择随机可用端口，并尝试打开系统浏览器；
-- 无桌面环境时自动降级为打印访问地址；
-- 页面只展示业务概念，并发梯度、请求数、命中率等折叠在“高级选项”。
-
-演示：
-
-```bash
-ucm-accept --gui --mock --fast
-```
-
-### 2.4 CLI（服务器 / 堡垒机 / 容器）
-
-```bash
-ucm-accept --base-url http://127.0.0.1:8801/v1 --model Qwen2.5-0.5B-Instruct
-```
-
-进入菜单后按数字选择，`A` 全跑，`R` 查看最近报告，`S` 修改服务地址，`Q` 退出。
-
-非交互：
-
-```bash
-ucm-accept --all
-ucm-accept --item perf
-ucm-accept --item multiturn --scenario code
-ucm-accept --all --report /data/ucm-report.html
-ucm-accept --doctor --probe
-```
-
-退出码：
-
-| 场景 | 退出码 |
-|---|---|
-| 全部通过 / 有条件通过 | 0 |
-| 不通过 | 2 |
-| 未完成 / 执行异常 | 3 |
-| 单项通过 / 关注 | 0 |
-| 单项未通过 | 2 |
-
-### 2.5 构建产物（GitHub Actions）
-
-仓库已配置完整打包流水线，产物发布在 [Releases](https://github.com/ucm-system/ucm-accept/releases)：
-
-- wheel / sdist
-- Windows x64 exe
-- Linux amd64/arm64 deb、rpm、portable tar
-- amd64/arm64 Docker 镜像 + multi-arch manifest（`ghcr.io/ucm-system/ucm-accept`；GHCR 包可能需登录，离线请用 Release 中的 image tar）
-- amd64/arm64 离线 wheelhouse
-- `SHA256SUMS`
-
-流水线说明与校验矩阵见 [docs/packaging-pipeline.md](docs/packaging-pipeline.md)。
-
-### 2.6 容器
-
-```bash
-docker run --rm -it \
-  -v /data/ucm:/data \
-  ucm-accept:latest \
-  --config /etc/ucm-accept/config.yaml --outputs /data/outputs
-```
-
-离线多架构构建见 [docs/offline-build.md](docs/offline-build.md)。
-
----
-
-## 三、界面与流程
-
-### 3.1 GUI 首页
-
-- 顶部：服务地址、模型名称、API Key、连通状态；
-- 中部：五项测试卡片（名称、一句话说明、预计耗时、运行按钮）；
-- 底部：一键全跑、实时进度、执行日志、报告预览与下载、PDF 导出；
-- “高级选项”折叠：性能并发梯度、请求数、上下文长度、输出长度、前缀命中率、SLA 模式与阈值、精度遍数、多轮/Agent 并发等。
-
-### 3.2 CLI 菜单
-
-```text
-====================================================
- UCM 推理加速验收工具 (CLI)  v1.1.0
- 执行引擎: EvalScope 实机
-====================================================
-服务地址: http://127.0.0.1:8801/v1
-模型:     Qwen2.5-0.5B-Instruct
-报告目录: ./outputs
-----------------------------------------------------
- [1] 基础性能测试    约 5 分钟
- [2] 多轮对话测试    约 10 分钟
- [3] SLA 自动调优    约 8 分钟
- [4] 精度测试        约 20 分钟
- [5] Agent 场景测试  约 15 分钟
- [A] 执行全部验收测试
- [R] 查看最近报告
- [S] 修改服务地址 / 模型
- [Q] 退出
-----------------------------------------------------
-请选择:
-```
-
-### 3.3 进度与报告
-
-- GUI 使用 Gradio 进度条显示当前阶段；日志区保留 EvalScope 输出摘要；
-- CLI 使用步骤编号 + ✓ / ! / ✗ + 百分比；
-- 每一项结束后立即写 `report.json` / `report.html`，即使中途中断也可查看已完成部分；
-- 全部完成后生成统一验收报告。
-
----
-
-## 四、验收报告
-
-![UCM 验收报告预览](docs/report-preview.png)
-
-报告是**完全自包含的离线 HTML**：内嵌 CSS 与 SVG 图表，不依赖外网字体、JS、CDN。
-
-章节：
-
-1. **概览**：服务信息、执行时间、总耗时、五项状态、总体结论（通过 / 有条件通过 / 不通过 / 未完成）。
-2. **基础性能**：指标表 + TTFT/TPOT/吞吐趋势图。
-3. **多轮对话**：场景、会话完成率、轮次、延迟、缓存命中；明确注明不回放对话。
-4. **SLA 自动调优**：目标阈值 vs 实测 P90、建议并发、探测点、差距说明。
-5. **精度**：两遍得分、均值、标准差、两遍偏差、稳定性判定，附两次柱状对比图。
-6. **Agent**：AgentX 服务级指标、上下文、`submission_valid`、降级标记、口径说明。
-7. **验收口径**：本次使用的 SLA/精度/Agent 参数。
-8. **原始数据与复核**：每项的 EvalScope 执行命令、原始输出目录、`command.txt`、`report.json`、`run.log`、原生 HTML/JSON 报告链接。
-
-### 可复现性设计
-
-- 每项输出目录内都有 `command.txt`，记录**脱敏后的完整 EvalScope 命令**；
-- 报告“执行命令”折叠块可一键复制；
-- 原始数据目录完整保留 `evalscope.log`、`benchmark_summary.json`、`benchmark_percentile.json`、`reports/` 等；
-- 报告只汇总 EvalScope 数值，不二次计算分数；除均值/标准差/两遍偏差这类**展示统计**外，不做任何评分推断；
-- 原始报告链接直接指向本地 EvalScope HTML/JSON。
-
-### 输出目录
-
-```text
-outputs/
-├── latest.txt                       # 最近一次报告指针
-└── runs/<run_id>/
-    ├── report.html
-    ├── report.json
-    ├── summary.json
-    ├── run.log
-    ├── items/<key>.json
-    └── evalscope/
-        ├── perf/...
-        ├── multiturn/dialogue/...
-        ├── sla/...
-        ├── accuracy/<dataset>/run1|run2/...
-        └── agent/...
-```
-
----
-
-## 五、配置
-
-默认配置在 [`ucm_accept/resources/config.yaml`](ucm_accept/resources/config.yaml)，所有预设参数外置。支持：
-
-```bash
-ucm-accept --config /etc/ucm-accept/config.yaml ...
-```
-
-也支持环境变量展开：
-
-```yaml
-endpoint:
-  base_url: ${UCM_BASE_URL:-http://127.0.0.1:8801/v1}
-  model: ${UCM_MODEL:-Qwen2.5-0.5B-Instruct}
-perf:
-  tokenizer_path: ${UCM_TOKENIZER_PATH:-/opt/ucm-accept/assets/tokenizers/Qwen2.5-0.5B-Instruct}
-```
-
-### 关键配置
-
-| 配置项 | 默认 | 说明 |
+| 你拿到的 | 适用场景 | 对应章节 |
 |---|---|---|
-| `endpoint.base_url` | `http://127.0.0.1:8801/v1` | OpenAI 兼容服务根地址 |
-| `endpoint.model` | `Qwen2.5-0.5B-Instruct` | 被测模型名 |
-| `perf.parallel` | `[20]` | 性能并发梯度 |
-| `perf.number` | `200` | 每个并发点请求数 |
-| `perf.max_prompt_length` | `65536` | 64K 上下文 |
-| `perf.max_tokens` | `256` | 输出长度 |
-| `sla.mode` | `auto_tune` | `auto_tune`（原生 P90 搜索）或 `verify`（只测目标并发） |
-| `sla.target` | 64K / 200 / 10s / 50ms | SLA 验收口径 |
-| `accuracy.runs` | `2` | 每项精度执行遍数 |
-| `accuracy.datasets` | GPQA、GSM8K、LongBench-v2、BFCL-v3 | 数据集与子集 |
-| `agent.duration_s` | `900` | AgentX benchmark 最短 900 秒 |
-| `app.report_dir` | `./outputs` | 报告根目录 |
-| `evalscope.executable` | `evalscope` | 可指向离线 venv 内的可执行文件 |
-| `evalscope.min_version` | `1.15.0` | `--doctor` 校验 |
+| 一个 `.zip`（`ucm-accept-windows-x64.zip`，里面有 `ucm-accept.exe` 和 `_internal` 目录） | Windows 客户机 | 2.1 |
+| 一个 `.deb` / `.rpm` / `.tar.gz` | Linux 客户机 | 2.2 |
+| 一个 Docker 镜像 tar 或镜像地址 | 服务器只允许容器 | 2.3 |
+| 一个 `ucm-accept-offline-tooling-<版本>-<架构>.tar.gz`（离线依赖 + 工具 + 指南全在内） | 服务器有 Python、无外网 | 2.4 |
 
-### 高级选项与命令行映射
+### 第 1 步：安装（按你的场景选一个，只做一次）
 
-- 命中率 → `--prefix-length`（仅 `random` 数据集）；
-- 并发梯度 → `--parallel 10 20 40 --number 200 200 200`；
-- SLA 模式 → 原生 `--sla-auto-tune` 或单点 `perf`；
-- 精度样本数 → `eval --limit`。
+**2.1 Windows**
 
-### 命令模板覆写
+1. 把 zip **整个解压**（不要只拖出 exe 单个文件）；
+2. 按 `Win+R`，输入 `cmd` 回车；
+3. 在黑窗口里，用 `cd` 进入解压出来的目录（zip 里有示例路径），照抄：
 
-不同客户现场的 EvalScope 版本可能存在参数差异。可在配置中整体覆写 argv：
-
-```yaml
-evalscope:
-  perf_command: ["/opt/venv/bin/evalscope", "perf", "--model", "{model}", "..."]
-  accuracy_command: ["evalscope", "eval", "--model", "{model}", "..."]
-  multiturn_command: []
-  agent_command: []
+```bat
+cd /d D:\ucm-accept
+ucm-accept.exe --gui
 ```
 
-支持占位符：`{model}`、`{url}`、`{base_url}`、`{api_key}`、`{output_dir}`、`{dataset}`、`{tokenizer}`、`{limit}`、`{parallel}`、`{number}`。
+浏览器会自动打开验收工具页面。关掉窗口即退出。
 
-> 建议优先使用内置参数构造器，只有版本差异时才覆写。覆写命令同样会写入 `command.txt`。
+**2.2 Linux（有管理员权限）**
+
+```bash
+# deb 系（麒麟 V10 / Ubuntu / Debian）：
+sudo dpkg -i ucm-accept_1.2.0_amd64.deb
+# rpm 系（openEuler / 麒麟中标版）：
+sudo rpm -ivh ucm-accept-1.2.0-1.x86_64.rpm
+# tar 包（没有管理员权限时，解压即用）：
+tar -xzf ucm-accept-linux-amd64.tar.gz && ./ucm-accept-linux-amd64/ucm-accept --gui
+```
+
+装好后：桌面出现「UCM 验收工具」图标（双击打开），或在终端照抄：
+
+```bash
+ucm-accept --gui
+```
+
+**2.3 容器（服务器只允许 Docker 时）**
+
+```bash
+docker load -i ucm-accept-1.2.0-amd64.tar          # 导入镜像
+docker run --rm -it -p 8080:8080 \
+  -v /data/ucm:/data \
+  ucm-accept:1.2.0 --gui --host 0.0.0.0 --port 8080
+```
+
+然后在**你自己的电脑浏览器**打开 `http://<服务器IP>:8080`。
+（不想开页面也可以：去掉 `--gui --host 0.0.0.0 --port 8080`，直接进入命令行菜单。）
+
+**2.4 有 Python 的服务器（离线工具包，推荐）**
+
+offline-tooling 包里已经配好：全部依赖 wheel、验收工具本体、离线配置模板、本指南。解压后照抄三条命令：
+
+```bash
+tar -xzf ucm-accept-offline-tooling-1.2.0-amd64.tar.gz -C ucm-accept-offline && cd ucm-accept-offline
+python -m venv .venv && source .venv/bin/activate
+pip install --no-index --find-links wheelhouse "ucm-accept==1.2.0" "evalscope[perf,service]>=1.15,<2"
+```
+
+装完先自检，再打开界面：
+
+```bash
+ucm-accept --doctor --probe
+ucm-accept --gui        # 浏览器打开；纯命令行就去掉 --gui
+```
+
+### 第 2 步：填两个空，点「检测连通」
+
+打开页面后，只需要动两处：
+
+1. **服务地址**：被测推理服务的地址，形如 `http://10.1.2.3:8000/v1`（问客户/部署同学要，注意以 `/v1` 结尾）；
+2. **模型名称**：要验收的模型名（不确定就先点「检测连通」，工具会提示实际可用的名称）。
+
+然后点 **「检测连通」**：
+
+- 显示绿色 `● 服务连通` → 继续第 3 步；
+- 显示红色 → 看本文第三章「出问题了」对照表。
+
+### 第 3 步：点运行，等结果
+
+- 页面中部有 **5 张测试卡片**，每张都可单独点「运行」；
+- 或直接点绿色大按钮 **「执行所选测试项」**（默认五项全选，按需取消勾选）；
+- 每项测试的预计耗时显示在卡片上（默认口径合计约 1 小时）；
+- 全部跑完后，页面下方自动生成**验收报告**，点「下载完整 HTML 报告」即可保存/发客户。
+
+> 首次接触不知道怎么选？**默认全选就是标准验收口径**（64K 上下文、200 并发、SLA 10s/50ms、精度双跑），不用改任何参数。
 
 ---
 
-## 六、现场自检
+## 二、日常使用速查
+
+### 命令速查（GUI 不方便时的等价命令）
+
+| 想做什么 | 照抄（替换尖括号部分） |
+|---|---|
+| 打开图形界面 | `ucm-accept --gui` |
+| 不打开页面跑完全部 | `ucm-accept --all` |
+| 只跑性能测试 | `ucm-accept --items perf` |
+| 跑性能 + SLA | `ucm-accept --items perf,sla` |
+| 指定服务地址 | `ucm-accept --all --base-url http://10.1.2.3:8000/v1 --model 模型名` |
+| 命令行菜单（服务器/堡垒机） | `ucm-accept` |
+| 现场自检（装完先跑这个） | `ucm-accept --doctor --probe` |
+| 查看最近一次报告 | `ucm-accept` 菜单里按 `R` |
+| 保存本次参数下次复用 | `ucm-accept --save-config my.yaml`，之后加 `--config my.yaml` |
+
+### CLI 菜单（纯命令行环境）
+
+```
+[1] 基础性能测试      ← 输入数字单独跑
+[2] 多轮对话测试
+[3] SLA 自动调优
+[4] 精度测试
+[5] Agent 场景测试
+[A] 执行所选测试项     ← 按 T 先勾选范围，再按 A
+[T] 选择要执行的测试项 ← 例：输入 1,3-5
+[R] 查看最近报告
+[S] 修改服务地址 / 模型
+[Q] 退出
+```
+
+### 报告在哪、怎么用
+
+- GUI：页面底部「验收报告」实时预览，「下载完整 HTML 报告」保存；
+- CLI：命令行最后会打印 `报告：<路径>`；输出根目录默认 `./outputs`，最新一次在 `outputs/runs/<任务号>/report.html`；
+- 报告是**单个 HTML 文件**：双击浏览器打开即可，微信/邮件直接发客户，无需带其他文件；
+- 需要正式 PDF：浏览器打开报告 → `Ctrl+P` → 另存为 PDF（或装了 weasyprint/chromium 时点 GUI 的「导出 PDF」）。
+
+### 每次验收前 30 秒检查单
+
+1. `ucm-accept --doctor --probe` 全绿（红项按第三章处理）；
+2. 服务地址、模型名与客户确认一致；
+3. GPU 推理服务已就绪、有并发余量（验收会真实打流量）；
+4. 磁盘剩余 ≥ 2GB（报告与原始数据）。
+
+---
+
+## 三、出问题了？按这里排查
+
+### 连通检测失败（红色）
+
+| 现象 | 原因 | 怎么办 |
+|---|---|---|
+| `无法连接服务 http://…` | 地址写错 / 服务没起 / 端口不通 | 在服务器上照抄 `curl http://<地址>/models`，通不了就找部署同学 |
+| 地址末尾不是 `/v1` | 常见笔误 | 改成 `http://<IP>:<端口>/v1` |
+| 连通但模型名报错 | 模型名与服务不一致 | 浏览器打开 `http://<地址>/models`，把列表里的名字抄进「模型名称」 |
+
+### 自检（doctor）出现红/黄项
+
+| 检查项 | 说明 | 怎么办 |
+|---|---|---|
+| EvalScope 未找到 | 缺压测引擎 | 按 2.4 离线安装；或 `pip install "evalscope[perf]>=1.15"` |
+| EvalScope 版本 < 1.15 | 旧版缺 SLA 参数 | 升级 evalscope；或临时把 SLA 模式改为 `verify` |
+| Tokenizer 不存在 | 资产包未带 tokenizer | 找构建同学要 `ucm-assets` 资产包，放到工具同级 `assets/` 目录 |
+| 数据集缓存 缺失 | 精度数据集未预热 | 联网机器预热一次（见离线文档），或现场只跑性能/SLA/多轮 |
+| 服务连通 失败 | 同上连通检测 | 见上表 |
+
+### 验收结论看不懂？
+
+| 结论 | 含义 | 你要做的 |
+|---|---|---|
+| 通过 | 全部达标 | 下载报告交客户 |
+| 有条件通过 | 有黄项（如两遍精度略有波动） | 看报告黄项说明，与客户确认口径 |
+| 不通过 | 有红项（指标未达 SLA / 请求失败） | 看报告对应章节的差距说明，转给调优同学 |
+| 未完成 | 中途取消/出错 | 看日志（GUI 日志区 / `outputs/runs/<任务号>/run.log`）排除后重跑 |
+
+### 其他常见问题
+
+- **页面打不开（远程服务器）**：启动时加 `--host 0.0.0.0 --port 8080`，浏览器访问 `http://<服务器IP>:8080`，防火墙放行该端口；
+- **想换默认参数**（并发/上下文/阈值）：GUI「测试配置」面板可改、可保存；不要直接改软件内置文件；
+- **报告目录想换地方**：GUI「测试配置」或 `--outputs /data/xxx`；
+- **想加自家的测试数据集**：见离线文档的「数据集注册表」，纯配置、不用改代码。
+
+---
+
+## 四、离线环境（客户现场无外网）
+
+工具本身、依赖、数据集、tokenizer **全部离线可用**，前提是拿到两样东西：
+
+1. **工具安装包**（第一章任选一种形态）；
+2. **统一资产包 `ucm-assets/`**（构建同学产出）：内含 tokenizer、多轮预设、精度数据集缓存和 SHA256 清单。
+
+使用方法（三种形态通用）：
+
+- Docker：`-v /data/ucm-assets:/opt/ucm-accept/assets:ro` 挂载即可；
+- deb/rpm：解压到 `/opt/ucm-accept/assets`（工具自动发现）；
+- Windows exe / portable tar：改名为 `assets/` 放在 exe 同级（自动发现）；
+- 其他：环境变量 `UCM_ASSETS_DIR=<资产包路径>`，或 GUI「测试配置」里填。
+
+装好后第一件事永远是：
 
 ```bash
 ucm-accept --doctor --probe
 ```
 
-检查项：
+工具会自动发现资产包、逐文件校验 SHA256、检查 tokenizer 与数据集缓存，全部 ✓ 即可开始验收。
 
-- Python 版本、配置合法性、报告目录可写；
-- EvalScope 是否存在及版本是否 >= 1.15；
-- AgentX 依赖 `aiperf`；
-- GUI 依赖 `gradio`；
-- 内置多轮预设数据与 SHA256；
-- tokenizer 路径；
-- 服务连通性（`/v1/models`，必要时 `/v1/chat/completions`）；
-- PDF 导出组件。
+> 交付包组装、资产包构建、离线踩坑清单（libgomp 版本、chat template、ModelScope 离线变量等）见 **[docs/offline-build.md](docs/offline-build.md)**（给构建同学）。
 
 ---
 
-## 七、离线构建
+## 五、五项验收是什么（向客户解释用）
 
-完整流程见 [docs/offline-build.md](docs/offline-build.md)；CI/Release 流水线见 [docs/packaging-pipeline.md](docs/packaging-pipeline.md)。核心原则：
+| 验收项 | 一句话说明 | 默认口径 | 预计耗时 |
+|---|---|---|---|
+| 基础性能 | 64K 长输入下的吞吐 / 首字延迟 / 逐字延迟 | 20 并发 × 200 请求 | ~5 分钟 |
+| 多轮对话 | 多轮连续会话的稳定性与 KV Cache 命中 | 12 组 × 2–5 轮 | ~10 分钟 |
+| SLA 自动调优 | 实测 P90 是否满足时延阈值（TTFT<10s、TPOT<50ms） | 200 并发 | ~8 分钟 |
+| 精度测试 | 数学/问答/长文本/工具调用得分，两遍对比验证一致性 | 4 数据集 × 2 遍 | ~20 分钟 |
+| Agent 场景 | 256K 超长会话服务级压测 | 15 分钟持续负载 | ~15 分钟 |
 
-1. 在联网构建机预下载全部 Python wheel、数据集、tokenizer；
-2. 所有物料落到固定路径并生成 SHA256 清单；
-3. 用 `--doctor` + `--mock --fast --all` 做虚跑校验；
-4. 产出 exe / deb / rpm / 双架构镜像时复用同一份物料与同一份 `config.yaml`；
-5. 现场只用离线安装命令，不访问外网。
+所有数值均来自 [EvalScope](https://github.com/modelscope/evalscope) 原生输出，本工具只做编排与呈现，报告内附可复现的原始命令。
 
 ---
 
-## 八、开发与测试
+## 附录（给构建 / 维护 / 开发人员）
+
+- **设计原则**：测试逻辑全部由 EvalScope 原生承担（perf / eval / sla-auto-tune / AgentX），本工具不实现任何自研压测或评分算法；模拟模式（`--mock --fast`）用于演示与 CI 虚跑，报告会明确标注「不作为验收结论」。
+- **配置项全表**：[`ucm_accept/resources/config.yaml`](ucm_accept/resources/config.yaml) 内注释即文档；支持 `${ENV:-默认值}` 展开；GUI「测试配置」是它的可视化子集。
+- **与 EvalScope 对应关系**：性能 `evalscope perf`；多轮 `--multi-turn --dataset custom_multi_turn`；SLA `--sla-auto-tune`（p90_ttft/p90_tpot）；精度 `evalscope eval`；Agent `--scenario agentx`。可用 `evalscope.<xx>_command` 整体覆写 argv 适配客户版本。
+- **离线资产构建**：[docs/offline-build.md](docs/offline-build.md)（统一资产包 `ucm-assets/` 一次构建、Docker/deb/exe/wheel 四形态共用；含实测踩坑清单）。
+- **打包流水线**：[docs/packaging-pipeline.md](docs/packaging-pipeline.md)。CI 产物：wheel/sdist、Windows exe、Linux deb/rpm/portable tar、amd64/arm64 Docker 镜像（GHCR）、离线 wheelhouse、SHA256SUMS。
+- **本地开发**：
 
 ```bash
-pip install -e ".[dev]"
-pytest -q
-ruff check ucm_accept tests
+pip install -e ".[dev,gui]"
+ruff check ucm_accept tests scripts && pytest -q      # 100+ 用例
+ucm-accept --mock --fast --all                        # 不接模型虚跑全流程
 ```
 
-测试覆盖：
-
-- 配置合并 / 环境变量 / 校验；
-- EvalScope 控制台与 JSON 输出解析（含真实 `benchmark_summary.json` / `benchmark_percentile.json` / AgentX `metrics` 结构）；
-- 模拟引擎全流程、降级画像、进度事件；
-- 报告 HTML 自包含、XSS 转义、原始链接；
-- CLI 全跑 / 单项 / 导出 / 自检；
-- GUI 构建（子进程）与高级参数校验；
-- EvalScope CLI 参数拼装（用假 executable 验证，不产生真实模型流量）。
-
----
-
-## 九、已知边界
-
-1. **EvalScope 版本**：低于 1.15 不支持 `p90_ttft` / `p90_tpot`，`--doctor` 会告警；请升级或使用 `sla.mode=verify`（只测 200 并发）。
-2. **AgentX 不是任务评测**：只输出服务级指标；任务质量请另配评测。
-3. **多轮对话无回放**：EvalScope 原生不提供可回放 transcript；报告不编造。
-4. **PDF**：默认只有 HTML；PDF 需 WeasyPrint / Chromium，或浏览器打印。
-5. **数据集离线**：EvalScope 数据集缓存路径由 EvalScope/ModelScope 管理，建议在构建机预热后整目录打包；详见离线构建文档。
-6. **Kylin 桌面**：GUI 依赖系统浏览器与 Python 运行时；deb 包需在对应麒麟版本上验证。
-7. **Agent 上下文降级方式**：低于 256K 时只能降级为 EvalScope AgentX `smoke`（固定 4 条 trace），不是按任意上下文裁剪任务集；smoke 指标不可与标准 256K 结果比较。
-8. **模拟模式**：`--mock` 仅用于演示与 CI 虚跑，报告显著标注，不产生真实请求。
-
----
-
-## 十、目录结构
-
-```text
-ucm_accept/
-├── cli.py                 # 菜单 / 非交互 CLI
-├── gui.py                 # Gradio BS 界面
-├── service.py             # GUI/CLI 共用会话服务
-├── orchestrator.py        # 五项编排、进度、落盘
-├── report.py              # 自包含 HTML / SVG / PDF
-├── config.py              # YAML 合并 / 环境变量 / 校验
-├── models.py              # 结果模型与结论规则
-├── doctor.py              # 现场自检
-├── engine/
-│   ├── evalscope_engine.py# EvalScope 原生 CLI 适配
-│   ├── parser.py          # 官方输出解析
-│   ├── mock.py            # CI / 演示用的确定性模拟
-│   └── chat.py            # 连通性与上下文探测（最小实现）
-└── resources/
-    ├── config.yaml
-    ├── assets_manifest.json
-    └── datasets/multiturn/{dialogue,code,office}.jsonl
-```
+- **版本**：[CHANGELOG.md](CHANGELOG.md)。当前 1.2.0。

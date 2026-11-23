@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .config import DEFAULT_CONFIG_PATH, Config, ConfigError, deep_merge
+from . import assets as assets_hub
+from .config import DEFAULT_CONFIG_PATH, Config, ConfigError
 from .errors import UCMAcceptError
 from .events import ProgressEvent
 from .models import ITEM_BY_KEY, ITEM_KEYS, STATUS_LABELS, TEST_ITEMS, AcceptanceReport, Status
@@ -98,11 +99,10 @@ body,.gradio-container{background:
 .gradio-container .row:has(.test-card){display:flex!important;align-items:stretch!important}
 .gradio-container .row:has(.test-card) > .column{display:flex!important}
 .test-card{display:flex!important;flex-direction:column!important;min-height:344px!important}
-/* 状态徽章 + 按钮组成底部信息区，多余留白集中在中部 */
-.test-card > :nth-child(1){order:1}
-.test-card > :nth-child(2){order:3;margin-top:auto!important}
-.test-card > :nth-child(3):not(button){order:2}
-.test-card > button{order:4;margin-top:12px!important;width:100%!important}
+.test-card > .card-enable{position:absolute;top:12px;right:14px;z-index:2;transform:scale(.82);transform-origin:top right}
+.test-card > .card-enable label{font-size:11px!important;color:var(--ucm-muted)!important;gap:4px}
+.test-card > button{margin-top:auto!important;width:100%!important}
+.test-card .card-desc{flex:1}
 .test-card:hover{box-shadow:var(--shadow-md)!important;transform:translateY(-2px);border-color:var(--ucm-line-strong)!important}
 .test-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent,#0e9f8c);opacity:.85}
 .card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
@@ -537,6 +537,20 @@ def build_demo(service: AcceptanceService):
     mode_class = "" if service.mode == "live" else " ucm-mode-mock"
     theme = gr.themes.Soft(primary_hue="teal", neutral_hue="slate")
 
+    # 内置 tokenizer 候选
+    try:
+        hub = assets_hub.find_assets_root(str(config.get("app.assets_dir", "") or "") or None)
+        builtin_tok = assets_hub.builtin_tokenizers(hub) if hub else []
+    except Exception:  # noqa: BLE001
+        builtin_tok = []
+    tok_path = str(config.get("perf.tokenizer_path", "") or "")
+    builtin_match = next(
+        (name for name in builtin_tok if name and (name in tok_path or tok_path.endswith("/" + name))),
+        None,
+    )
+    tok_builtin_choices = [f"内置：{name}" for name in builtin_tok] + ["自定义路径"]
+    tok_default_index = builtin_tok.index(builtin_match) if builtin_match in builtin_tok else len(builtin_tok)
+
     with gr.Blocks(title=f"{config.get('app.title')} v{__version__}") as demo:
         gr.HTML(
             f"""
@@ -546,7 +560,7 @@ def build_demo(service: AcceptanceService):
               <p>{_esc(config.get('app.subtitle'))}</p>
               <div class="chips">
                 <span class="ucm-chip{mode_class}">执行引擎：{_esc(mode_text)}</span>
-                <span class="ucm-chip">底层：<b>EvalScope</b> 原生 perf / eval / AgentX</span>
+                <span class="ucm-chip">底层：EvalScope 原生 perf / eval / AgentX</span>
                 <span class="ucm-chip">离线可用 · 报告自包含</span>
                 <span class="ucm-chip">v{_esc(__version__)}</span>
               </div>
@@ -554,6 +568,7 @@ def build_demo(service: AcceptanceService):
             """
         )
 
+        # ============== 端点区 ==============
         with gr.Group(elem_classes="ucm-endpoint"):
             with gr.Row():
                 base_url = gr.Textbox(
@@ -575,63 +590,35 @@ def build_demo(service: AcceptanceService):
                     scale=2,
                 )
             with gr.Row():
+                tokenizer_mode = gr.Radio(
+                    choices=tok_builtin_choices,
+                    value=tok_builtin_choices[tok_default_index],
+                    label="模型路径（Tokenizer）",
+                    info="「内置」来自离线资产包 tokenizers/ 目录；选「自定义路径」后填写本地路径或 ModelScope 模型 ID",
+                    scale=2,
+                )
+                tokenizer_custom = gr.Textbox(
+                    label="自定义路径 / 模型 ID",
+                    value="" if builtin_match else tok_path,
+                    placeholder="/opt/ucm-assets/tokenizers/<模型名>",
+                    visible=not builtin_tok or builtin_match is None,
+                    scale=3,
+                )
+            with gr.Row():
                 probe_btn = gr.Button("检测连通", variant="secondary", scale=0)
                 probe_status = gr.HTML(
                     '<div class="ucm-hint">尚未检测。点击“检测连通”验证地址、模型与上下文窗口。</div>',
                     elem_classes="ucm-probe-status",
                 )
 
-        items_check = gr.CheckboxGroup(
-            choices=[meta.name for meta in TEST_ITEMS],
-            value=[ITEM_BY_KEY[key].name for key in config.run_items()],
-            label="验收范围（勾选要执行的测试项）",
-            info="取消勾选即跳过对应测试项；下方“执行所选测试项”只跑勾选内容。",
-            elem_id="items-check",
-        )
-
-        gr.HTML(
-            '<div class="ucm-section-title">验收项目 <small>点击单项运行，或按上方勾选的范围一键执行</small></div>'
-        )
-        status_components: dict[str, Any] = {}
-        run_buttons: dict[str, Any] = {}
-        scenarios: dict[str, Any] = {}
-        for row_keys in (("perf", "multiturn", "sla"), ("accuracy", "agent")):
-            with gr.Row(equal_height=True):
-                for key in row_keys:
-                    meta = ITEM_BY_KEY[key]
-                    accent = ITEM_ACCENTS.get(key, "#0e9f8c")
-                    with gr.Column(elem_classes="test-card", elem_id=f"card-{key}"):
-                        gr.HTML(
-                            f"""
-                            <div class="card-top">
-                              <div class="card-head">
-                                <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
-                                <div>
-                                  <div class="card-title">{_esc(meta.name)}</div>
-                                  <div class="card-eta">{_esc(meta.eta)}</div>
-                                </div>
-                              </div>
-                            </div>
-                            <div class="card-desc">{_esc(meta.description)}</div>
-                            """
-                        )
-                        status_components[key] = gr.HTML(_status_html(service, key))
-                        if key == "multiturn":
-                            scenarios[key] = gr.Radio(
-                                choices=["对话", "代码", "办公"],
-                                value={"dialogue": "对话", "code": "代码", "office": "办公"}.get(
-                                    str(config.get("multiturn.scenario", "dialogue")), "对话"
-                                ),
-                                label="场景预设",
-                                show_label=False,
-                                container=False,
-                            )
-                        run_buttons[key] = gr.Button("运行", variant="secondary", size="sm")
-                if len(row_keys) == 2:
-                    with gr.Column(scale=1, min_width=180):
-                        pass
-
-        advanced_values = []
+        # ============== 验收项目：每卡片勾选 + 卡内配置 ==============
+        run_items_cfg = config.run_items()
+        presets = config.get("multiturn.scenarios", {}) or {}
+        mt_labels = [str(presets[k].get("label", k)) for k in presets]
+        mt_label_to_key = {str(presets[k].get("label", k)): k for k in presets}
+        mt_selected = [str(k) for k in (config.get("multiturn.scenarios_selected", []) or [])] or [
+            str(config.get("multiturn.scenario", "dialogue"))
+        ]
         datasets_cfg = config.get("accuracy.datasets", {}) or {}
         acc_labels_all = [str(item.get("label", key)) for key, item in datasets_cfg.items()]
         acc_labels_enabled = [
@@ -639,36 +626,231 @@ def build_demo(service: AcceptanceService):
             for key, item in datasets_cfg.items()
             if bool(item.get("enabled", True))
         ]
-        acc_label_to_key = {str(item.get("label", key)): key for key, item in datasets_cfg.items()}
-        with gr.Accordion("⚙️ 测试配置（改完即生效，可保存为配置文件）", open=False, elem_classes="ucm-config"):
+
+        gr.HTML(
+            '<div class="ucm-section-title">验收项目 <small>勾选纳入验收；展开「配置」调整该项参数；单项可点「运行」</small></div>'
+        )
+        status_components: dict[str, Any] = {}
+        run_buttons: dict[str, Any] = {}
+        card_enable: dict[str, Any] = {}
+
+        with gr.Row(equal_height=True):
+            with gr.Column(elem_classes="test-card", elem_id="card-perf"):
+                meta = ITEM_BY_KEY["perf"]
+                accent = ITEM_ACCENTS["perf"]
+                card_enable["perf"] = gr.Checkbox(value="perf" in run_items_cfg, label="纳入验收",
+                                                  show_label=False, container=False, elem_classes="card-enable")
+                gr.HTML(
+                    f"""
+                    <div class="card-top">
+                      <div class="card-head">
+                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
+                        <div>
+                          <div class="card-title">{_esc(meta.name)}</div>
+                          <div class="card-eta">{_esc(meta.eta)}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="card-desc">{_esc(meta.description)}</div>
+                    """
+                )
+                status_components["perf"] = gr.HTML(_status_html(service, "perf"))
+                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+                    perf_parallel_card = gr.Textbox(
+                        label="并发梯度",
+                        value=",".join(str(v) for v in config.get("perf.parallel", [20])),
+                        info="单点 20，或梯度 10,20,40（可增删）",
+                    )
+                    perf_number_card = gr.Number(
+                        label="请求数", value=int(config.get("perf.number", 200)), precision=0
+                    )
+                    perf_input_len_card = gr.Number(
+                        label="输入长度（tokens）", value=int(config.get("perf.max_prompt_length", 65536)), precision=0
+                    )
+                    perf_output_len_card = gr.Number(
+                        label="输出长度（tokens）", value=int(config.get("perf.max_tokens", 256)), precision=0
+                    )
+                run_buttons["perf"] = gr.Button("运行", variant="secondary", size="sm")
+
+        with gr.Row(equal_height=True):
+            with gr.Column(elem_classes="test-card", elem_id="card-multiturn"):
+                meta = ITEM_BY_KEY["multiturn"]
+                accent = ITEM_ACCENTS["multiturn"]
+                card_enable["multiturn"] = gr.Checkbox(value="multiturn" in run_items_cfg, label="纳入验收",
+                                                       show_label=False, container=False, elem_classes="card-enable")
+                gr.HTML(
+                    f"""
+                    <div class="card-top">
+                      <div class="card-head">
+                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
+                        <div>
+                          <div class="card-title">{_esc(meta.name)}</div>
+                          <div class="card-eta">{_esc(meta.eta)}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="card-desc">{_esc(meta.description)}</div>
+                    """
+                )
+                status_components["multiturn"] = gr.HTML(_status_html(service, "multiturn"))
+                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+                    mt_scenarios_card = gr.CheckboxGroup(
+                        choices=mt_labels,
+                        value=[str(presets[k].get("label", k)) for k in presets if k in mt_selected],
+                        label="数据集（多选，按顺序执行）",
+                    )
+                    mt_parallel_card = gr.Number(
+                        label="并发", value=int(config.get("multiturn.parallel", 4)), precision=0
+                    )
+                    mt_conv_card = gr.Number(
+                        label="每组会话数", value=int(config.get("multiturn.conversations", 12)), precision=0
+                    )
+                run_buttons["multiturn"] = gr.Button("运行", variant="secondary", size="sm")
+            with gr.Column(elem_classes="test-card", elem_id="card-sla"):
+                meta = ITEM_BY_KEY["sla"]
+                accent = ITEM_ACCENTS["sla"]
+                card_enable["sla"] = gr.Checkbox(value="sla" in run_items_cfg, label="纳入验收",
+                                                 show_label=False, container=False, elem_classes="card-enable")
+                gr.HTML(
+                    f"""
+                    <div class="card-top">
+                      <div class="card-head">
+                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
+                        <div>
+                          <div class="card-title">{_esc(meta.name)}</div>
+                          <div class="card-eta">{_esc(meta.eta)}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="card-desc">{_esc(meta.description)}</div>
+                    """
+                )
+                status_components["sla"] = gr.HTML(_status_html(service, "sla"))
+                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+                    sla_mode_card = gr.Radio(
+                        choices=[
+                            ("auto_tune（原生 P90，推荐）", "auto_tune"),
+                            ("verify（只跑目标并发）", "verify"),
+                        ],
+                        value=str(config.get("sla.mode", "auto_tune")),
+                        label="模式",
+                    )
+                    sla_ttft_card = gr.Number(
+                        label="TTFT.P90 阈值（秒）",
+                        value=float(config.get("sla.target.ttft_p90_ms", 10000)) / 1000,
+                    )
+                    sla_tpot_card = gr.Number(
+                        label="TPOT.P90 阈值（毫秒）",
+                        value=float(config.get("sla.target.tpot_p90_ms", 50)),
+                    )
+                    sla_conc_card = gr.Number(
+                        label="目标并发", value=int(config.get("sla.target.concurrency", 200)), precision=0
+                    )
+                run_buttons["sla"] = gr.Button("运行", variant="secondary", size="sm")
+
+        with gr.Row(equal_height=True):
+            with gr.Column(elem_classes="test-card", elem_id="card-accuracy"):
+                meta = ITEM_BY_KEY["accuracy"]
+                accent = ITEM_ACCENTS["accuracy"]
+                card_enable["accuracy"] = gr.Checkbox(value="accuracy" in run_items_cfg, label="纳入验收",
+                                                      show_label=False, container=False, elem_classes="card-enable")
+                gr.HTML(
+                    f"""
+                    <div class="card-top">
+                      <div class="card-head">
+                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
+                        <div>
+                          <div class="card-title">{_esc(meta.name)}</div>
+                          <div class="card-eta">{_esc(meta.eta)}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="card-desc">{_esc(meta.description)}</div>
+                    """
+                )
+                status_components["accuracy"] = gr.HTML(_status_html(service, "accuracy"))
+                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+                    acc_datasets_card = gr.CheckboxGroup(
+                        choices=acc_labels_all,
+                        value=acc_labels_enabled,
+                        label="数据集（多选）",
+                    )
+                    acc_runs_card = gr.Number(
+                        label="每项遍数", value=int(config.get("accuracy.runs", 2)), precision=0,
+                        info="默认 2 遍，用于一致性核验",
+                    )
+                    acc_limit_card = gr.Number(label="每项样本数（0=按预设）", value=0, precision=0)
+                run_buttons["accuracy"] = gr.Button("运行", variant="secondary", size="sm")
+            with gr.Column(elem_classes="test-card", elem_id="card-agent"):
+                meta = ITEM_BY_KEY["agent"]
+                accent = ITEM_ACCENTS["agent"]
+                card_enable["agent"] = gr.Checkbox(value="agent" in run_items_cfg, label="纳入验收",
+                                                   show_label=False, container=False, elem_classes="card-enable")
+                gr.HTML(
+                    f"""
+                    <div class="card-top">
+                      <div class="card-head">
+                        <div class="card-icon" style="--accent:{accent}">{meta.icon}</div>
+                        <div>
+                          <div class="card-title">{_esc(meta.name)}</div>
+                          <div class="card-eta">{_esc(meta.eta)}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="card-desc">{_esc(meta.description)}</div>
+                    """
+                )
+                status_components["agent"] = gr.HTML(_status_html(service, "agent"))
+                with gr.Accordion("配置", open=False, elem_classes="card-config"):
+                    agent_ctx_card = gr.Number(
+                        label="目标上下文（tokens）",
+                        value=int(config.get("agent.context_required", 262144)),
+                        precision=0,
+                        info="低于模型上限时自动降级 smoke 模式",
+                    )
+                    agent_duration_card = gr.Number(
+                        label="持续时长（分钟）",
+                        value=max(15, int(config.get("agent.duration_s", 900)) // 60),
+                        precision=0,
+                    )
+                run_buttons["agent"] = gr.Button("运行", variant="secondary", size="sm")
+
+        # ============== 运行与结果 ==============
+        with gr.Row():
+            run_all_btn = gr.Button("执行勾选的验收测试", elem_classes="run-all", size="lg")
+            refresh_btn = gr.Button("查看最新报告", variant="secondary")
+            pdf_btn = gr.Button("导出 PDF", variant="secondary")
+
+        with gr.Row():
+            with gr.Column(scale=1):
+                stage_md = gr.Markdown("就绪")
+                log_box = gr.Textbox(
+                    label="实时日志",
+                    lines=12,
+                    max_lines=12,
+                    interactive=False,
+                    autoscroll=True,
+                    elem_classes="ucm-log",
+                    placeholder="执行进度与 EvalScope 输出会显示在这里",
+                )
+            with gr.Column(scale=1):
+                summary_html = gr.HTML(_summary_html(service))
+                download_file = gr.File(label="下载完整 HTML 报告", interactive=False, elem_classes="ucm-filebox")
+                pdf_file = gr.File(label="PDF 报告", interactive=False, elem_classes="ucm-filebox")
+
+        gr.HTML(
+            '<div class="ucm-section-title">验收报告 <small>报告内嵌图表与原始命令，可离线归档</small></div>'
+        )
+        report_html = gr.HTML(_report_frame(service))
+
+        # ============== 高级配置（低频项） ==============
+        with gr.Accordion("⚙️ 高级配置（低频项）", open=False, elem_classes="ucm-config"):
             gr.HTML(
-                '<div class="ucm-hint">所有参数外置在 config.yaml；此处修改只对本次会话生效，'
-                "点击「保存到配置文件」后持久化，下次可用 ucm-accept --config 复用。API Key 不落盘。</div>"
+                '<div class="ucm-hint">各测试项的主要参数已在上方卡片内。此处为低频高级参数，'
+                "修改仅对本次会话生效，点击「保存到配置文件」后持久化。API Key 不落盘。</div>"
             )
             with gr.Tabs():
-                with gr.Tab("性能与 SLA"):
-                    with gr.Row():
-                        perf_parallel = gr.Textbox(
-                            label="性能并发梯度",
-                            value=",".join(str(item) for item in config.get("perf.parallel", [20])),
-                            info="单点 20，或梯度 10,20,40",
-                        )
-                        perf_number = gr.Number(
-                            label="性能请求数", value=int(config.get("perf.number", 200)), precision=0
-                        )
-                        input_length = gr.Number(
-                            label="上下文长度",
-                            value=int(config.get("perf.max_prompt_length", 65536)),
-                            precision=0,
-                        )
-                        max_tokens = gr.Number(
-                            label="最大输出 tokens", value=int(config.get("perf.max_tokens", 256)), precision=0
-                        )
-                        endpoint_timeout = gr.Number(
-                            label="请求超时（秒）",
-                            value=float(config.get("endpoint.timeout_s", 180)),
-                            precision=0,
-                        )
+                with gr.Tab("性能"):
                     with gr.Row():
                         min_tokens_field = gr.Number(
                             label="最小输出 tokens", value=int(config.get("perf.min_tokens", 256)), precision=0
@@ -678,41 +860,27 @@ def build_demo(service: AcceptanceService):
                             value=str(config.get("perf.dataset", "random")),
                             info="默认 random 合成长输入；离线镜像可换本地数据集",
                         )
-                        perf_warmup = gr.Number(
-                            label="预热请求数", value=int(config.get("perf.warmup_num", 0)), precision=0
-                        )
                         hit_rate = gr.Slider(
-                            label="前缀命中率（高级）", minimum=0, maximum=0.9, step=0.05,
+                            label="前缀命中率", minimum=0, maximum=0.9, step=0.05,
                             value=float(config.get("defaults.hit_rate", 0.0)),
                             info="映射为 EvalScope --prefix-length",
                         )
                     with gr.Row():
-                        tokenizer = gr.Textbox(
-                            label="Tokenizer 路径 / ID",
-                            value=str(config.get("perf.tokenizer_path", "")),
-                            info="离线环境请填镜像内本地路径",
+                        perf_warmup = gr.Number(
+                            label="预热请求数", value=int(config.get("perf.warmup_num", 0)), precision=0
                         )
-                        sla_mode = gr.Radio(
-                            label="SLA 模式",
-                            choices=[
-                                ("auto_tune（EvalScope 原生 P90，推荐）", "auto_tune"),
-                                ("verify（只跑目标并发复核）", "verify"),
-                            ],
-                            value=str(config.get("sla.mode", "auto_tune")),
-                        )
-                    with gr.Row():
-                        sla_concurrency = gr.Number(
-                            label="SLA 目标并发",
-                            value=int(config.get("sla.target.concurrency", 200)),
+                        endpoint_timeout = gr.Number(
+                            label="请求超时（秒）",
+                            value=float(config.get("endpoint.timeout_s", 180)),
                             precision=0,
                         )
-                        ttft_limit = gr.Number(
-                            label="TTFT.P90 阈值（秒）",
-                            value=float(config.get("sla.target.ttft_p90_ms", 10000)) / 1000,
+                with gr.Tab("多轮 / SLA / Agent"):
+                    with gr.Row():
+                        mt_min_turns = gr.Number(
+                            label="多轮最少轮次", value=int(config.get("multiturn.min_turns", 2)), precision=0
                         )
-                        tpot_limit = gr.Number(
-                            label="TPOT.P90 阈值（毫秒）",
-                            value=float(config.get("sla.target.tpot_p90_ms", 50)),
+                        mt_max_turns = gr.Number(
+                            label="多轮最多轮次", value=int(config.get("multiturn.max_turns", 5)), precision=0
                         )
                         sla_lower = gr.Number(
                             label="自动调优下限", value=int(config.get("sla.auto_tune.lower", 2)), precision=0
@@ -720,57 +888,11 @@ def build_demo(service: AcceptanceService):
                         sla_upper = gr.Number(
                             label="自动调优上限", value=int(config.get("sla.auto_tune.upper", 200)), precision=0
                         )
-                with gr.Tab("多轮 / 精度 / Agent"):
                     with gr.Row():
-                        mt_parallel = gr.Number(
-                            label="多轮并发", value=int(config.get("multiturn.parallel", 4)), precision=0
-                        )
-                        mt_conversations = gr.Number(
-                            label="多轮会话数", value=int(config.get("multiturn.conversations", 12)), precision=0
-                        )
-                        mt_min_turns = gr.Number(
-                            label="多轮最少轮次", value=int(config.get("multiturn.min_turns", 2)), precision=0
-                        )
-                        mt_max_turns = gr.Number(
-                            label="多轮最多轮次", value=int(config.get("multiturn.max_turns", 5)), precision=0
-                        )
-                    with gr.Row():
-                        accuracy_runs = gr.Number(
-                            label="精度每项遍数",
-                            value=int(config.get("accuracy.runs", 2)),
-                            precision=0,
-                            info="默认 2 遍，用于 KVCache 一致性",
-                        )
-                        accuracy_limit = gr.Number(
-                            label="精度样本数（0=按预设）",
-                            value=0,
-                            precision=0,
-                        )
-                        agent_parallel = gr.Number(
-                            label="AgentX 并发", value=int(config.get("agent.parallel", 4)), precision=0
-                        )
-                        agent_duration = gr.Number(
-                            label="AgentX 持续时间（秒）",
-                            value=int(config.get("agent.duration_s", 900)),
-                            precision=0,
-                            info="EvalScope 默认 30 分钟；现场可按验收窗口调整",
-                        )
-                    with gr.Row():
-                        acc_datasets = gr.CheckboxGroup(
-                            choices=acc_labels_all,
-                            value=acc_labels_enabled,
-                            label="启用的精度数据集",
-                            info="按现场时间增减；全部取消会被拒绝",
-                        )
                         agent_dataset = gr.Textbox(
                             label="Agent 数据集",
                             value=str(config.get("agent.dataset_name", "AgentX-claudecode")),
                         )
-                    gr.HTML(
-                        '<div class="ucm-hint">数据集在 config.yaml 或资产包 '
-                        "datasets/registry.yaml 中声明（含描述与样本数）；下表随配置与资产包自动更新。</div>"
-                    )
-                    dataset_table = gr.HTML(_dataset_table_html(config))
                 with gr.Tab("报告信息"):
                     with gr.Row():
                         report_title_field = gr.Textbox(
@@ -782,6 +904,10 @@ def build_demo(service: AcceptanceService):
                         report_operator = gr.Textbox(
                             label="测试执行人", value=str(config.get("report.operator", "") or "")
                         )
+            gr.HTML(
+                '<div class="ucm-hint">数据集在 config.yaml 或资产包 datasets/registry.yaml 中声明；下表随配置与资产包更新。</div>'
+            )
+            dataset_table = gr.HTML(_dataset_table_html(config))
             with gr.Row():
                 save_btn = gr.Button("保存到配置文件", variant="primary", size="sm")
                 export_btn = gr.Button("导出当前配置", size="sm")
@@ -800,68 +926,7 @@ def build_demo(service: AcceptanceService):
                 cfg_export_file = gr.File(label="导出的配置", interactive=False, elem_classes="ucm-filebox")
             cfg_status = gr.Markdown("")
 
-        advanced_values = [
-            perf_parallel,
-            perf_number,
-            input_length,
-            max_tokens,
-            hit_rate,
-            tokenizer,
-            sla_mode,
-            sla_concurrency,
-            ttft_limit,
-            tpot_limit,
-            accuracy_runs,
-            accuracy_limit,
-            mt_parallel,
-            mt_conversations,
-            agent_parallel,
-            agent_duration,
-        ]
-        extra_values = [
-            endpoint_timeout,
-            min_tokens_field,
-            perf_dataset,
-            perf_warmup,
-            mt_min_turns,
-            mt_max_turns,
-            sla_lower,
-            sla_upper,
-            acc_datasets,
-            agent_dataset,
-            report_title_field,
-            report_company,
-            report_operator,
-        ]
-        run_inputs = [base_url, model, api_key, *advanced_values, *extra_values]
-
-        with gr.Row():
-            run_all_btn = gr.Button("执行所选测试项", elem_classes="run-all", size="lg")
-            refresh_btn = gr.Button("查看最新报告", variant="secondary")
-            pdf_btn = gr.Button("导出 PDF", variant="secondary")
-
-        with gr.Row():
-            with gr.Column(scale=1):
-                stage_md = gr.Markdown("就绪")
-                log_box = gr.Textbox(
-                    label="执行日志",
-                    lines=12,
-                    max_lines=12,
-                    interactive=False,
-                    autoscroll=True,
-                    elem_classes="ucm-log",
-                    placeholder="执行进度与 EvalScope 输出会显示在这里",
-                )
-            with gr.Column(scale=1):
-                summary_html = gr.HTML(_summary_html(service))
-                download_file = gr.File(label="下载完整 HTML 报告", interactive=False, elem_classes="ucm-filebox")
-                pdf_file = gr.File(label="PDF 报告", interactive=False, elem_classes="ucm-filebox")
-
-        gr.HTML(
-            '<div class="ucm-section-title">验收报告 <small>报告内嵌图表与原始命令，可离线归档</small></div>'
-        )
-        report_html = gr.HTML(_report_frame(service))
-
+        # ============== 事件处理 ==============
         output_components = [
             *[status_components[key] for key in ITEM_KEYS],
             stage_md,
@@ -871,66 +936,83 @@ def build_demo(service: AcceptanceService):
             download_file,
             pdf_file,
         ]
+        enables_list = [card_enable[key] for key in ITEM_KEYS]
 
         def _unchanged(count: int) -> tuple[Any, ...]:
             return tuple(gr.update() for _ in range(count))
 
-        def _advanced_field_values(cfg: Config) -> tuple[Any, ...]:
-            ds_limits = [
-                int(item.get("limit", 0) or 0)
-                for item in (cfg.get("accuracy.datasets", {}) or {}).values()
+        def _run_field_values(cfg: Config) -> tuple[Any, ...]:
+            """按 [5 勾选, 端点/tokenizer(5), 卡内字段(16), 高级低频项(13)] 顺序返回全部字段值。"""
+            items = cfg.run_items()
+            ds = cfg.get("accuracy.datasets", {}) or {}
+            mt_sel = [str(k) for k in (cfg.get("multiturn.scenarios_selected", []) or [])] or [
+                str(cfg.get("multiturn.scenario", "dialogue"))
             ]
+            tok = str(cfg.get("perf.tokenizer_path", "") or "")
+            hub = None
+            try:
+                hub = assets_hub.find_assets_root(str(cfg.get("app.assets_dir", "") or "") or None)
+            except Exception:  # noqa: BLE001
+                hub = None
+            builtin_names = assets_hub.builtin_tokenizers(hub) if hub else []
+            builtin_match = next(
+                (name for name in builtin_names if name and (name in tok or tok.endswith("/" + name))),
+                None,
+            )
+            if builtin_match:
+                tok_mode, tok_custom = f"内置：{builtin_match}", ""
+            else:
+                tok_mode, tok_custom = "自定义路径", tok
+            mt_sel_labels = [
+                str(item.get("label", k))
+                for k, item in (cfg.get("multiturn.scenarios", {}) or {}).items()
+                if k in mt_sel
+            ]
+            ds_limits = [int(item.get("limit", 0) or 0) for item in ds.values()]
             uniform = ds_limits[0] if ds_limits and all(value == ds_limits[0] for value in ds_limits) else 0
             return (
-                ",".join(str(value) for value in cfg.get("perf.parallel", [20])),
+                *[key in items for key in ITEM_KEYS],
+                str(cfg.get("endpoint.base_url", "")),
+                str(cfg.get("endpoint.model", "")),
+                str(cfg.get("endpoint.api_key", "") or ""),
+                tok_mode,
+                tok_custom,
+                ",".join(str(v) for v in cfg.get("perf.parallel", [20])),
                 int(cfg.get("perf.number", 200)),
                 int(cfg.get("perf.max_prompt_length", 65536)),
                 int(cfg.get("perf.max_tokens", 256)),
-                float(cfg.get("defaults.hit_rate", 0.0) or 0.0),
-                str(cfg.get("perf.tokenizer_path", "")),
-                str(cfg.get("sla.mode", "auto_tune")),
-                int(cfg.get("sla.target.concurrency", 200)),
-                float(cfg.get("sla.target.ttft_p90_ms", 10000)) / 1000,
-                float(cfg.get("sla.target.tpot_p90_ms", 50)),
-                int(cfg.get("accuracy.runs", 2)),
-                uniform,
+                mt_sel_labels,
                 int(cfg.get("multiturn.parallel", 4)),
                 int(cfg.get("multiturn.conversations", 12)),
-                int(cfg.get("agent.parallel", 4)),
-                int(cfg.get("agent.duration_s", 900)),
-            )
-
-        def _extra_field_values(cfg: Config) -> tuple[Any, ...]:
-            ds = cfg.get("accuracy.datasets", {}) or {}
-            return (
-                float(cfg.get("endpoint.timeout_s", 180)),
-                int(cfg.get("perf.min_tokens", 256)),
+                str(cfg.get("sla.mode", "auto_tune")),
+                float(cfg.get("sla.target.ttft_p90_ms", 10000)) / 1000,
+                float(cfg.get("sla.target.tpot_p90_ms", 50)),
+                int(cfg.get("sla.target.concurrency", 200)),
+                [str(item.get("label", key)) for key, item in ds.items() if bool(item.get("enabled", True))],
+                int(cfg.get("accuracy.runs", 2)),
+                uniform,
+                int(cfg.get("agent.context_required", 262144)),
+                max(15, int(cfg.get("agent.duration_s", 900)) // 60),
+                float(cfg.get("defaults.hit_rate", 0.0) or 0.0),
                 str(cfg.get("perf.dataset", "random")),
+                int(cfg.get("perf.min_tokens", 256)),
                 int(cfg.get("perf.warmup_num", 0)),
+                float(cfg.get("endpoint.timeout_s", 180)),
                 int(cfg.get("multiturn.min_turns", 2)),
                 int(cfg.get("multiturn.max_turns", 5)),
                 int(cfg.get("sla.auto_tune.lower", 2)),
                 int(cfg.get("sla.auto_tune.upper", 200)),
-                [str(item.get("label", key)) for key, item in ds.items() if bool(item.get("enabled", True))],
                 str(cfg.get("agent.dataset_name", "AgentX-claudecode")),
                 str(cfg.get("report.title", "")),
                 str(cfg.get("report.company", "") or ""),
                 str(cfg.get("report.operator", "") or ""),
             )
 
-        def _field_refresh(cfg: Config) -> tuple[Any, ...]:
-            """按 [items_check, *run_inputs] 的输出顺序返回全部字段值。"""
-            return (
-                [ITEM_BY_KEY[key].name for key in cfg.run_items()],
-                str(cfg.get("endpoint.base_url")),
-                str(cfg.get("endpoint.model")),
-                str(cfg.get("endpoint.api_key", "") or ""),
-                *_advanced_field_values(cfg),
-                *_extra_field_values(cfg),
-            )
+        _ACC_FIELD_INDEX = 21  # 5 勾选 + 端点/tokenizer(5) + 卡内第 11 个
 
-        # 字段刷新元组里精度数据集 Checkbox 的位置（items + endpoint + advanced 之后第 9 个）
-        _ACC_FIELD_INDEX = 1 + 3 + 16 + 8
+        def _field_refresh(cfg: Config) -> tuple[Any, ...]:
+            """按 [*enables_list, *run_inputs] 的输出顺序返回全部字段值。"""
+            return _run_field_values(cfg)
 
         def _apply_config_values(cfg: Config, status: str) -> tuple[Any, ...]:
             values = list(_field_refresh(cfg))
@@ -941,24 +1023,92 @@ def build_demo(service: AcceptanceService):
             )
             return (*values, _dataset_table_html(cfg), status)
 
+        def _resolve_tokenizer(mode: str, custom: str) -> str:
+            if str(mode).startswith("内置："):
+                name = str(mode).split("内置：", 1)[1].strip()
+                hub = assets_hub.find_assets_root(str(service.config.get("app.assets_dir", "") or "") or None)
+                if hub is not None:
+                    return str(hub / "tokenizers" / name)
+                return name
+            return str(custom or "").strip()
+
         def _prepare(
+            enables: Any,
             base: str,
             model_name: str,
             key_value: str,
-            items_labels: Any,
+            tokenizer_mode: str,
+            tokenizer_custom: str,
             *fields: Any,
         ) -> list[str]:
-            keys = _keys_for_labels(items_labels)
+            keys = [
+                key for key in ITEM_KEYS
+                if bool(enables[ITEM_KEYS.index(key)])
+            ]
             if not keys:
                 raise UCMAcceptError("请至少勾选一个测试项")
             service.update_endpoint(base_url=base, model=model_name, api_key=key_value)
             service.config.set("run.items", keys)
-            advanced, extra = fields[:16], fields[16:]
-            overrides = _advanced_overrides(*advanced)
-            overrides = deep_merge(
-                overrides,
-                _extra_overrides(*extra[:8], dict(acc_label_to_key), extra[8], *extra[9:]),
-            )
+            service.config.set("perf.tokenizer_path", _resolve_tokenizer(tokenizer_mode, tokenizer_custom))
+            (perf_parallel, perf_number, perf_input_len, perf_output_len,
+             mt_scenarios, mt_parallel, mt_conv,
+             sla_mode, sla_ttft, sla_tpot, sla_conc,
+             acc_datasets, acc_runs, acc_limit,
+             agent_ctx, agent_duration,
+             hit_rate, perf_dataset, min_tokens, perf_warmup, endpoint_timeout,
+             mt_min_turns, mt_max_turns, sla_lower, sla_upper, agent_dataset,
+             rpt_title, rpt_company, rpt_operator) = fields
+            mt_keys_sel = [mt_label_to_key.get(sel, sel) for sel in (mt_scenarios or [])]
+            ds = service.config.get("accuracy.datasets", {}) or {}
+            _label_to_key = {str(item.get("label", key)): key for key, item in ds.items()}
+            chosen = {_label_to_key.get(sel, sel) for sel in (acc_datasets or [])}
+            service.config.set("perf.parallel", _parse_parallel(perf_parallel))
+            service.config.set("perf.number", int(perf_number))
+            service.config.set("perf.min_prompt_length", int(perf_input_len))
+            service.config.set("perf.max_prompt_length", int(perf_input_len))
+            service.config.set("perf.max_tokens", int(perf_output_len))
+            service.config.set("multiturn.scenarios_selected", mt_keys_sel)
+            service.config.set("multiturn.parallel", int(mt_parallel))
+            service.config.set("multiturn.conversations", int(mt_conv))
+            service.config.set("sla.mode", str(sla_mode))
+            service.config.set("sla.target.ttft_p90_ms", float(sla_ttft) * 1000)
+            service.config.set("sla.target.tpot_p90_ms", float(sla_tpot))
+            service.config.set("sla.target.concurrency", int(sla_conc))
+            for key in ds:
+                ds[key]["enabled"] = key in chosen
+            service.config.set("accuracy.datasets", ds)
+            service.config.set("accuracy.runs", int(acc_runs))
+            if int(acc_limit or 0) > 0:
+                for key in ds:
+                    ds[key]["limit"] = int(acc_limit)
+                service.config.set("accuracy.datasets", ds)
+            service.config.set("agent.context_required", int(agent_ctx))
+            service.config.set("agent.duration_s", int(agent_duration) * 60)
+            overrides = {
+                "defaults": {"hit_rate": float(hit_rate or 0.0)},
+                "perf": {
+                    "dataset": str(perf_dataset).strip() or "random",
+                    "min_tokens": int(min_tokens or 256),
+                    "warmup_num": max(0, int(perf_warmup or 0)),
+                },
+                "endpoint": {"timeout_s": float(endpoint_timeout or 180)},
+                "multiturn": {
+                    "min_turns": int(mt_min_turns or 2),
+                    "max_turns": int(mt_max_turns or 5),
+                },
+                "sla": {
+                    "auto_tune": {
+                        "lower": int(sla_lower or 2),
+                        "upper": int(sla_upper or 200),
+                    }
+                },
+                "agent": {"dataset_name": str(agent_dataset).strip()},
+                "report": {
+                    "title": str(rpt_title).strip(),
+                    "company": str(rpt_company).strip(),
+                    "operator": str(rpt_operator).strip(),
+                },
+            }
             service.apply_overrides(overrides)
             return keys
 
@@ -990,11 +1140,12 @@ def build_demo(service: AcceptanceService):
 
         def run_one(
             key: str,
-            scenario_label: str,
-            items_labels: Any,
+            enables: Any,
             base: str,
             model_name: str,
             key_value: str,
+            tokenizer_mode: str,
+            tokenizer_custom: str,
             *fields: Any,
             progress=gr.Progress(track_tqdm=False),  # noqa: B008 - Gradio 注入约定
         ):
@@ -1011,16 +1162,12 @@ def build_demo(service: AcceptanceService):
                     pass
 
             try:
-                _prepare(base, model_name, key_value, items_labels, *fields)
+                _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
             except Exception as exc:  # noqa: BLE001
                 logs.append(f"✗ 参数校验失败：{exc}")
                 return _render(logs, "参数校验失败")
             try:
-                item = service.run_item(
-                    key,
-                    scenario=_parse_scenario(scenario_label) if key == "multiturn" else None,
-                    progress=on_progress,
-                )
+                item = service.run_item(key, progress=on_progress)
                 logs.append(f"✓ {item.name} 完成：{STATUS_LABELS[item.status]}")
                 stage = f"完成 · {item.name}：{STATUS_LABELS[item.status]}"
             except Exception as exc:  # noqa: BLE001
@@ -1030,10 +1177,12 @@ def build_demo(service: AcceptanceService):
             return _render(logs, stage)
 
         def run_all(
-            items_labels: Any,
+            enables: Any,
             base: str,
             model_name: str,
             key_value: str,
+            tokenizer_mode: str,
+            tokenizer_custom: str,
             *fields: Any,
             progress=gr.Progress(track_tqdm=False),  # noqa: B008 - Gradio 注入约定
         ):
@@ -1047,7 +1196,7 @@ def build_demo(service: AcceptanceService):
                     pass
 
             try:
-                keys = _prepare(base, model_name, key_value, items_labels, *fields)
+                keys = _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
             except Exception as exc:  # noqa: BLE001
                 logs.append(f"✗ 参数校验失败：{exc}")
                 return _render(logs, "参数校验失败")
@@ -1060,9 +1209,10 @@ def build_demo(service: AcceptanceService):
                 stage = "执行失败"
             return _render(logs, stage)
 
-        def save_click(path_value: str, items_labels: Any, base: str, model_name: str, key_value: str, *fields: Any):
+        def save_click(path_value: str, enables: Any, base: str, model_name: str, key_value: str,
+                       tokenizer_mode: str, tokenizer_custom: str, *fields: Any):
             try:
-                _prepare(base, model_name, key_value, items_labels, *fields)
+                _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
                 target = service.config.save(path_value or _default_save_path(service.config))
                 return (
                     *_field_refresh(service.config),
@@ -1070,11 +1220,12 @@ def build_demo(service: AcceptanceService):
                     f"✅ 配置已保存：`{target}`\n下次启动复用：`ucm-accept --config {target}`",
                 )
             except Exception as exc:  # noqa: BLE001
-                return (*_unchanged(34), f"❌ 保存失败：{exc}")
+                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 保存失败：{exc}")
 
-        def export_click(items_labels: Any, base: str, model_name: str, key_value: str, *fields: Any):
+        def export_click(enables: Any, base: str, model_name: str, key_value: str,
+                         tokenizer_mode: str, tokenizer_custom: str, *fields: Any):
             try:
-                _prepare(base, model_name, key_value, items_labels, *fields)
+                _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
                 target = service.outputs_root / "ucm-accept.export.yaml"
                 service.config.save(target)
                 return str(target), f"✅ 已导出当前生效配置：`{target}`"
@@ -1083,35 +1234,29 @@ def build_demo(service: AcceptanceService):
 
         def import_click(file_obj: Any):
             if file_obj is None:
-                return (*_unchanged(34), "⚠️ 未选择配置文件")
+                return (*_unchanged(39), _dataset_table_html(service.config), "⚠️ 未选择配置文件")
             path = file_obj.name if hasattr(file_obj, "name") else str(file_obj)
             try:
                 cfg = Config.load(path)
             except ConfigError as exc:
-                return (*_unchanged(34), f"❌ 配置无效：{exc}")
+                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 配置无效：{exc}")
             except OSError as exc:
-                return (*_unchanged(34), f"❌ 读取失败：{exc}")
+                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 读取失败：{exc}")
             try:
                 service.replace_config(cfg)
             except Exception as exc:  # noqa: BLE001
-                return (*_unchanged(34), f"❌ 应用失败：{exc}")
-            ds = cfg.get("accuracy.datasets", {}) or {}
-            acc_label_to_key.clear()
-            acc_label_to_key.update({str(item.get("label", key)): key for key, item in ds.items()})
+                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 应用失败：{exc}")
             return _apply_config_values(cfg, f"✅ 已导入并应用：`{path}`")
 
         def reset_click():
             try:
                 cfg = Config.load(overrides={"app": {"report_dir": str(service.outputs_root)}})
             except ConfigError as exc:
-                return (*_unchanged(34), f"❌ 加载默认配置失败：{exc}")
+                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 加载默认配置失败：{exc}")
             try:
                 service.replace_config(cfg)
             except Exception as exc:  # noqa: BLE001
-                return (*_unchanged(34), f"❌ 应用失败：{exc}")
-            ds = cfg.get("accuracy.datasets", {}) or {}
-            acc_label_to_key.clear()
-            acc_label_to_key.update({str(item.get("label", key)): key for key, item in ds.items()})
+                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 应用失败：{exc}")
             return _apply_config_values(cfg, "♻️ 已恢复内置默认配置（输出目录保持不变）")
 
         def refresh_latest():
@@ -1127,7 +1272,6 @@ def build_demo(service: AcceptanceService):
                 f"结论：{report.conclusion}",
                 f"任务：{report.run_id} · {report.started_at}",
             ]
-            # 直接把最新 HTML 塞进 iframe，同时更新状态卡
             html_path = path.with_name("report.html")
             frame = (
                 f'<iframe class="ucm-report-frame" title="验收报告" srcdoc="{_esc(html_path.read_text(encoding="utf-8"))}"></iframe>'
@@ -1154,30 +1298,30 @@ def build_demo(service: AcceptanceService):
             except Exception as exc:  # noqa: BLE001
                 return None, f"PDF 导出失败：{exc}"
 
-        probe_btn.click(
-            probe_click,
-            inputs=[base_url, model, api_key],
-            outputs=[probe_status],
-        )
+        # ============== 事件绑定 ==============
+        probe_btn.click(probe_click, inputs=[base_url, model, api_key], outputs=[probe_status])
+        enables_list = [card_enable[key] for key in ITEM_KEYS]
+        run_inputs = [
+            base_url, model, api_key, tokenizer_mode, tokenizer_custom,
+            perf_parallel_card, perf_number_card, perf_input_len_card, perf_output_len_card,
+            mt_scenarios_card, mt_parallel_card, mt_conv_card,
+            sla_mode_card, sla_ttft_card, sla_tpot_card, sla_conc_card,
+            acc_datasets_card, acc_runs_card, acc_limit_card,
+            agent_ctx_card, agent_duration_card,
+            hit_rate, perf_dataset, min_tokens_field, perf_warmup, endpoint_timeout,
+            mt_min_turns, mt_max_turns, sla_lower, sla_upper, agent_dataset,
+            report_title_field, report_company, report_operator,
+        ]
         for key in ITEM_KEYS:
-            if key == "multiturn":
-                inputs = [scenarios[key], items_check, *run_inputs]
-                run_buttons[key].click(
-                    run_one,
-                    inputs=[gr.State(key), *inputs],
-                    outputs=output_components,
-                    concurrency_limit=1,
-                )
-            else:
-                run_buttons[key].click(
-                    run_one,
-                    inputs=[gr.State(key), gr.State(""), items_check, *run_inputs],
-                    outputs=output_components,
-                    concurrency_limit=1,
-                )
+            run_buttons[key].click(
+                run_one,
+                inputs=[gr.State(key), *enables_list, *run_inputs],
+                outputs=output_components,
+                concurrency_limit=1,
+            )
         run_all_btn.click(
             run_all,
-            inputs=[items_check, *run_inputs],
+            inputs=[*enables_list, *run_inputs],
             outputs=output_components,
             concurrency_limit=1,
         )
@@ -1185,26 +1329,26 @@ def build_demo(service: AcceptanceService):
         pdf_btn.click(pdf_click, inputs=[], outputs=[pdf_file, stage_md])
         save_btn.click(
             save_click,
-            inputs=[save_path, items_check, *run_inputs],
-            outputs=[items_check, *run_inputs, dataset_table, cfg_status],
+            inputs=[save_path, *enables_list, *run_inputs],
+            outputs=[*enables_list, *run_inputs, dataset_table, cfg_status],
             concurrency_limit=1,
         )
         export_btn.click(
             export_click,
-            inputs=[items_check, *run_inputs],
+            inputs=[*enables_list, *run_inputs],
             outputs=[cfg_export_file, cfg_status],
             concurrency_limit=1,
         )
         import_file.upload(
             import_click,
             inputs=[import_file],
-            outputs=[items_check, *run_inputs, dataset_table, cfg_status],
+            outputs=[*enables_list, *run_inputs, dataset_table, cfg_status],
             concurrency_limit=1,
         )
         reset_btn.click(
             reset_click,
             inputs=[],
-            outputs=[items_check, *run_inputs, dataset_table, cfg_status],
+            outputs=[*enables_list, *run_inputs, dataset_table, cfg_status],
             concurrency_limit=1,
         )
 
@@ -1212,6 +1356,8 @@ def build_demo(service: AcceptanceService):
     demo._ucm_theme = theme  # type: ignore[attr-defined]
     demo._ucm_css = CSS  # type: ignore[attr-defined]
     return demo
+
+
 
 
 def _find_free_port(host: str = "127.0.0.1") -> int:

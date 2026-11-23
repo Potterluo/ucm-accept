@@ -308,12 +308,85 @@ class Orchestrator:
         self._emit(item.summary, level="success" if item.status == Status.PASSED else "warning", fraction=1.0)
 
     # -------------------------------------------------------------- multiturn
-    def _run_multiturn(self, item: ItemResult, *, scenario: str | None = None) -> None:
-        key = scenario or str(self.config.get("multiturn.scenario", "dialogue"))
+    def _run_multiturn(self, item: ItemResult, *, scenario: str | list[str] | None = None) -> None:
+        """执行多轮对话测试；scenario 可为单键或多键列表（多场景顺序执行后聚合）。"""
+        keys = [scenario] if isinstance(scenario, str) else list(scenario or [])
+        if not keys:
+            keys = [str(k) for k in (self.config.get("multiturn.scenarios_selected", []) or [])]
+        if not keys:
+            keys = [str(self.config.get("multiturn.scenario", "dialogue"))]
         presets = self.config.get("multiturn.scenarios", {}) or {}
-        if key not in presets:
-            raise UCMAcceptError(f"未知多轮对话预设：{key}")
+        unknown = [key for key in keys if key not in presets]
+        if unknown:
+            raise UCMAcceptError(f"未知多轮对话预设：{'、'.join(unknown)}")
+        if len(keys) > 1:
+            scenario_results = []
+            total_conversations = 0
+            total_turns = 0
+            total_success = 0
+            worst_completion = 1.0
+            cache_hits = []
+            sub_outputs = []
+            fraction_span = 1.0 / len(keys)
+            for index, key in enumerate(keys):
+                self._fraction = 0.0
+                self._overall_base = 0.0
+                self._overall_span = 1.0
+                sub_item = ItemResult(key=item.key, name=item.name, status=Status.RUNNING, started_at=iso_now())
+                self._run_single_multiturn(sub_item, key, presets[key], fraction=0.05 + index * fraction_span * 0.9)
+                scenario_results.append({
+                    "key": key,
+                    "label": str(presets[key].get("label", key)),
+                    "status": sub_item.status.value,
+                    "summary": sub_item.summary,
+                    "detail": sub_item.detail,
+                })
+                total_conversations += sub_item.detail.get("load_total_conversations", 0)
+                total_turns += sub_item.detail.get("total_turns", 0)
+                total_success += sub_item.detail.get("load_success_conversations", 0)
+                completion = sub_item.detail.get("completion_rate", 0.0) or 0.0
+                worst_completion = min(worst_completion, completion)
+                if sub_item.detail.get("cache_hit_rate") is not None:
+                    cache_hits.append(sub_item.detail["cache_hit_rate"])
+                if sub_item.status in {Status.FAILED, Status.WARNING}:
+                    item.status = sub_item.status
+                sub_outputs.append(str(self.raw_root / "multiturn" / key))
+            item.detail = {
+                "scenarios": scenario_results,
+                "scenario_keys": keys,
+                "load_total_conversations": total_conversations,
+                "total_turns": total_turns,
+                "load_success_conversations": total_success,
+                "completion_rate": total_success / total_conversations if total_conversations else 0.0,
+                "cache_hit_rate": (sum(cache_hits) / len(cache_hits)) if cache_hits else None,
+            }
+            labels = "、".join(str(presets[k].get("label", k)) for k in keys)
+            completion = item.detail["completion_rate"]
+            if item.status == Status.FAILED:
+                item.summary = "多轮会话全部失败"
+            elif completion <= 0:
+                item.status = Status.FAILED
+                item.summary = "多轮会话全部失败"
+            elif completion < 0.99 or item.status == Status.WARNING:
+                item.status = Status.WARNING
+                item.summary = f"多场景（{labels}）完成率 {percent(completion)}"
+            else:
+                item.status = Status.PASSED
+                item.summary = (
+                    f"多场景（{labels}）：{total_conversations} 组会话、{total_turns} 轮，"
+                    f"完成率 {percent(completion)}"
+                )
+                if cache_hits:
+                    item.summary += f"，缓存命中 {percent(sum(cache_hits) / len(cache_hits))}"
+            item.artifacts["原始输出目录"] = relative_artifact(ensure_dir(self.raw_root / "multiturn"), self.run_dir)
+            write_json_atomic(self.item_dir / "multiturn.json", item.to_dict())
+            self._emit(item.summary, level="success" if item.status == Status.PASSED else "warning", fraction=1.0)
+            return
+        key = keys[0]
         preset = presets[key]
+        self._run_single_multiturn(item, key, preset)
+
+    def _run_single_multiturn(self, item: ItemResult, key: str, preset: dict[str, Any], *, fraction: float | None = None) -> None:
         dataset_path = self.config.resolve_asset(preset.get("dataset_path", ""))
         params = MultiturnParams(
             scenario_key=key,

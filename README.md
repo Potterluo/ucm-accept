@@ -6,6 +6,9 @@
 
 ![UCM 验收工具 GUI](docs/gui-preview.png)
 
+> 界面实时预览：main 分支每次更新后，CI 自动截图发布到 GitHub Pages ——
+> **https://ucm-system.github.io/ucm-accept/**
+
 ---
 
 ## 1. 安装

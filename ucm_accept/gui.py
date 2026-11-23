@@ -67,7 +67,7 @@ body,.gradio-container{background:var(--bg)!important}
 
 /* ===================== 输入框 ===================== */
 .gradio-container input[type="text"],.gradio-container input[type="number"],.gradio-container input[type="password"],
-.gradio-container textarea{
+.gradio-container textarea,.gradio-container .wrap.inner-dropdown-container > div,.gradio-container [data-testid="dropdown"]{
   border-radius:var(--radius-input)!important;border:1px solid var(--line-2)!important;
   background:var(--card)!important;transition:box-shadow .5s var(--ease),border-color .5s var(--ease)!important}
 .gradio-container input:focus,.gradio-container textarea:focus{
@@ -109,7 +109,10 @@ body,.gradio-container{background:var(--bg)!important}
 .ucm-item-row{display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;
   align-items:center!important;gap:16px;margin:0!important;padding:8px 0}
 .ucm-item-row > .block,.ucm-item-row > button{min-width:0!important}
-.ucm-item-row > .ucm-item-head-wrap{flex:1 1 auto!important;width:auto!important}
+.ucm-item-row > .ucm-item-head-wrap{flex:1 1 auto!important;width:auto!important;
+  margin-left:0!important;margin-right:0!important;padding-left:0!important;padding-right:0!important}
+.ucm-item-head-wrap .html-container{padding-left:0!important;padding-right:0!important}
+.ucm-item-head-wrap .prose{margin-left:0!important;margin-right:0!important}
 .ucm-item-row > .ucm-item-status{flex:0 0 auto!important;width:auto!important}
 .ucm-item-row > .card-enable{flex:0 0 auto!important;width:auto!important}
 .ucm-item-row > button.ucm-run-one{flex:0 0 auto!important;width:auto!important;min-width:66px!important}
@@ -146,18 +149,24 @@ body,.gradio-container{background:var(--bg)!important}
 .ucm-pill.running::before{animation:ucm-pulse 1.1s ease-in-out infinite}
 @keyframes ucm-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
 
-/* ===================== 纳入验收开关（iOS 拨动开关） ===================== */
-.card-enable{flex:0 0 auto!important;display:flex!important;align-items:center!important}
-.card-enable > div{margin:0!important}
-.card-enable label{display:inline-flex!important;align-items:center;margin:0!important;cursor:pointer;min-height:28px}
+/* ===================== 拨动开关（纳入验收 / 内置模型，iOS 风格） ===================== */
+.card-enable,.tok-switch{flex:0 0 auto!important;display:flex!important;align-items:center!important}
+.card-enable > div,.tok-switch > div{margin:0!important}
+.card-enable label,.tok-switch label{display:inline-flex!important;align-items:center;margin:0!important;
+  cursor:pointer;min-height:28px}
 .card-enable .label-text{display:none!important}
-.card-enable input[type="checkbox"]{appearance:none;-webkit-appearance:none;width:44px;height:26px;margin:0;
+.tok-switch label{min-height:40px;gap:10px}
+.tok-switch label span{font-weight:500!important;font-size:12.5px!important;color:var(--ink)!important}
+.card-enable input[type="checkbox"],.tok-switch input[type="checkbox"]{
+  appearance:none;-webkit-appearance:none;width:44px;height:26px;margin:0;
   border-radius:999px!important;background:#e9e9eb!important;border:none!important;box-shadow:none!important;
   cursor:pointer;transition:background .5s var(--ease);position:relative;outline:none;flex:none}
-.card-enable input[type="checkbox"]:checked{background:var(--green)!important}
-.card-enable input[type="checkbox"]::after{content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;
+.card-enable input[type="checkbox"]:checked,.tok-switch input[type="checkbox"]:checked{background:var(--green)!important}
+.card-enable input[type="checkbox"]::after,.tok-switch input[type="checkbox"]::after{
+  content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;
   border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.18);transition:transform .5s var(--ease)}
-.card-enable input[type="checkbox"]:checked::after{transform:translateX(18px)}
+.card-enable input[type="checkbox"]:checked::after,.tok-switch input[type="checkbox"]:checked::after{
+  transform:translateX(18px)}
 
 /* ===================== 按钮系统（胶囊） ===================== */
 .gradio-container button.primary{background:var(--blue)!important;border:none!important;color:#fff!important;
@@ -211,7 +220,7 @@ body,.gradio-container{background:var(--bg)!important}
 
 /* ===================== 项内配置折叠区 ===================== */
 .ucm-item-config{border:none!important;background:transparent!important;box-shadow:none!important;
-  padding:0!important;margin:0 0 8px 62px!important}
+  margin:0 0 8px 0!important;padding:0 0 8px 50px!important}
 .ucm-item-config .label-wrap,.ucm-item-config button,.ucm-item-config [role="button"]{
   width:100%;justify-content:flex-start!important;text-align:left;padding:3px 0!important;
   font-weight:500!important;font-size:12.5px!important;color:var(--blue)!important}
@@ -219,6 +228,10 @@ body,.gradio-container{background:var(--bg)!important}
 .ucm-item-config .wrap{background:transparent!important;border:none!important}
 .ucm-item-config .form{max-width:560px}
 .ucm-endpoint textarea{white-space:pre;overflow-x:auto}
+.tok-row{flex-wrap:nowrap!important;align-items:flex-end!important;gap:16px!important}
+.tok-row > .tok-switch{flex:0 0 auto!important;width:auto!important;margin-bottom:9px!important}
+.tok-row > .tok-switch label{min-height:26px!important}
+.tok-row > .form{flex:1 1 auto!important;width:auto!important;min-width:0!important}
 .ucm-config label span{font-weight:500!important;font-size:12px!important;color:var(--muted-2)!important}
 .ucm-config input,.ucm-config input[type="number"],.ucm-config textarea{border-radius:var(--radius-input)!important}
 
@@ -624,8 +637,7 @@ def build_demo(service: AcceptanceService):
         (name for name in builtin_tok if name and (name in tok_path or tok_path.endswith("/" + name))),
         None,
     )
-    tok_builtin_choices = [f"内置：{name}" for name in builtin_tok] + ["自定义路径"]
-    tok_default_index = builtin_tok.index(builtin_match) if builtin_match in builtin_tok else len(builtin_tok)
+    use_builtin_default = bool(builtin_tok) and builtin_match is not None
 
     with gr.Blocks(title=f"{config.get('app.title')} v{__version__}") as demo:
         gr.HTML(
@@ -666,20 +678,28 @@ def build_demo(service: AcceptanceService):
                     scale=2,
                 )
                 probe_btn = gr.Button("检测连通", variant="secondary", scale=0, elem_classes="probe-btn")
-            with gr.Row():
-                tokenizer_mode = gr.Radio(
-                    choices=tok_builtin_choices,
-                    value=tok_builtin_choices[tok_default_index],
-                    label="模型路径（Tokenizer）",
-                    elem_classes="ucm-choice",
+            with gr.Row(elem_classes="tok-row"):
+                tok_switch = gr.Checkbox(
+                    label="使用内置模型",
+                    value=use_builtin_default,
+                    visible=bool(builtin_tok),
+                    container=False,
+                    elem_classes="tok-switch",
+                    scale=2,
+                )
+                tok_builtin = gr.Dropdown(
+                    choices=builtin_tok,
+                    value=builtin_match if builtin_match in builtin_tok else (builtin_tok[0] if builtin_tok else None),
+                    label="内置模型（离线资产包）",
+                    visible=bool(builtin_tok) and use_builtin_default,
                     scale=3,
                 )
-                tokenizer_custom = gr.Textbox(
+                tok_custom = gr.Textbox(
                     label="自定义路径 / 模型 ID",
-                    value="" if builtin_match else tok_path,
-                    placeholder="/opt/ucm-assets/tokenizers/<模型名>",
-                    visible=not builtin_tok or builtin_match is None,
-                    scale=2,
+                    value="" if use_builtin_default else tok_path,
+                    placeholder="/opt/ucm-assets/tokenizers/<模型名> 或 ModelScope 模型 ID",
+                    visible=(not builtin_tok) or (not use_builtin_default),
+                    scale=3,
                 )
             probe_status = gr.HTML(
                 '<div class="ucm-hint">「内置」来自离线资产包 tokenizers/ 目录。尚未检测，'
@@ -966,7 +986,7 @@ def build_demo(service: AcceptanceService):
             return tuple(gr.update() for _ in range(count))
 
         def _run_field_values(cfg: Config) -> tuple[Any, ...]:
-            """按 [5 勾选, 端点/tokenizer(5), 卡内字段(16), 高级低频项(13)] 顺序返回全部字段值。"""
+            """按 [5 勾选, 端点/tokenizer(6), 卡内字段(16), 高级低频项(13)] 顺序返回全部字段值。"""
             items = cfg.run_items()
             ds = cfg.get("accuracy.datasets", {}) or {}
             mt_sel = [str(k) for k in (cfg.get("multiturn.scenarios_selected", []) or [])] or [
@@ -983,10 +1003,9 @@ def build_demo(service: AcceptanceService):
                 (name for name in builtin_names if name and (name in tok or tok.endswith("/" + name))),
                 None,
             )
-            if builtin_match:
-                tok_mode, tok_custom = f"内置：{builtin_match}", ""
-            else:
-                tok_mode, tok_custom = "自定义路径", tok
+            use_builtin = bool(builtin_names) and builtin_match is not None
+            tok_builtin_name = builtin_match if use_builtin else (builtin_names[0] if builtin_names else "")
+            tok_custom = "" if use_builtin else tok
             mt_sel_labels = [
                 str(item.get("label", k))
                 for k, item in (cfg.get("multiturn.scenarios", {}) or {}).items()
@@ -999,7 +1018,8 @@ def build_demo(service: AcceptanceService):
                 str(cfg.get("endpoint.base_url", "")),
                 str(cfg.get("endpoint.model", "")),
                 str(cfg.get("endpoint.api_key", "") or ""),
-                tok_mode,
+                use_builtin,
+                tok_builtin_name,
                 tok_custom,
                 ",".join(str(v) for v in cfg.get("perf.parallel", [20])),
                 int(cfg.get("perf.number", 200)),
@@ -1032,7 +1052,7 @@ def build_demo(service: AcceptanceService):
                 str(cfg.get("report.operator", "") or ""),
             )
 
-        _ACC_FIELD_INDEX = 21  # 5 勾选 + 端点/tokenizer(5) + 卡内第 11 个
+        _ACC_FIELD_INDEX = 22  # 5 勾选 + 端点/tokenizer(6) + 卡内第 11 个
 
         def _field_refresh(cfg: Config) -> tuple[Any, ...]:
             """按 [*enables_list, *run_inputs] 的输出顺序返回全部字段值。"""
@@ -1047,13 +1067,12 @@ def build_demo(service: AcceptanceService):
             )
             return (*values, _dataset_table_html(cfg), status)
 
-        def _resolve_tokenizer(mode: str, custom: str) -> str:
-            if str(mode).startswith("内置："):
-                name = str(mode).split("内置：", 1)[1].strip()
+        def _resolve_tokenizer(use_builtin: Any, builtin_name: str, custom: str) -> str:
+            if bool(use_builtin) and str(builtin_name or "").strip():
                 hub = assets_hub.find_assets_root(str(service.config.get("app.assets_dir", "") or "") or None)
                 if hub is not None:
-                    return str(hub / "tokenizers" / name)
-                return name
+                    return str(hub / "tokenizers" / str(builtin_name).strip())
+                return str(builtin_name).strip()
             return str(custom or "").strip()
 
         def _prepare(
@@ -1061,8 +1080,9 @@ def build_demo(service: AcceptanceService):
             base: str,
             model_name: str,
             key_value: str,
-            tokenizer_mode: str,
-            tokenizer_custom: str,
+            tok_use_builtin: Any,
+            tok_builtin_name: str,
+            tok_custom: str,
             *fields: Any,
         ) -> list[str]:
             keys = [
@@ -1073,7 +1093,7 @@ def build_demo(service: AcceptanceService):
                 raise UCMAcceptError("请至少勾选一个测试项")
             service.update_endpoint(base_url=base, model=model_name, api_key=key_value)
             service.config.set("run.items", keys)
-            service.config.set("perf.tokenizer_path", _resolve_tokenizer(tokenizer_mode, tokenizer_custom))
+            service.config.set("perf.tokenizer_path", _resolve_tokenizer(tok_use_builtin, tok_builtin_name, tok_custom))
             (perf_parallel, perf_number, perf_input_len, perf_output_len,
              mt_scenarios, mt_parallel, mt_conv,
              sla_mode, sla_ttft, sla_tpot, sla_conc,
@@ -1091,6 +1111,10 @@ def build_demo(service: AcceptanceService):
             service.config.set("perf.min_prompt_length", int(perf_input_len))
             service.config.set("perf.max_prompt_length", int(perf_input_len))
             service.config.set("perf.max_tokens", int(perf_output_len))
+            # 最小输出不得超过输出长度，否则推理服务返回 400
+            service.config.set(
+                "perf.min_tokens", min(int(min_tokens or 256), int(perf_output_len))
+            )
             service.config.set("multiturn.scenarios_selected", mt_keys_sel)
             service.config.set("multiturn.parallel", int(mt_parallel))
             service.config.set("multiturn.conversations", int(mt_conv))
@@ -1112,7 +1136,6 @@ def build_demo(service: AcceptanceService):
                 "defaults": {"hit_rate": float(hit_rate or 0.0)},
                 "perf": {
                     "dataset": str(perf_dataset).strip() or "random",
-                    "min_tokens": int(min_tokens or 256),
                     "warmup_num": max(0, int(perf_warmup or 0)),
                 },
                 "endpoint": {"timeout_s": float(endpoint_timeout or 180)},
@@ -1168,7 +1191,7 @@ def build_demo(service: AcceptanceService):
             progress=gr.Progress(track_tqdm=False),  # noqa: B008 - Gradio 注入约定
         ):
             # inputs = [State(key), *5 勾选, *run_inputs(34)]：按位置统一解包
-            enables, (base, model_name, key_value, tokenizer_mode, tokenizer_custom), fields = list(values[:5]), values[5:10], values[10:]
+            enables, (base, model_name, key_value, tok_use_builtin, tok_builtin_name, tok_custom), fields = list(values[:5]), values[5:11], values[11:]
             logs: list[str] = []
             stage = "准备执行…"
 
@@ -1182,7 +1205,7 @@ def build_demo(service: AcceptanceService):
                     pass
 
             try:
-                _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
+                _prepare(enables, base, model_name, key_value, tok_use_builtin, tok_builtin_name, tok_custom, *fields)
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
                 logs.append(f"✗ 参数校验失败：{exc}")
@@ -1202,7 +1225,7 @@ def build_demo(service: AcceptanceService):
             progress=gr.Progress(track_tqdm=False),  # noqa: B008 - Gradio 注入约定
         ):
             # inputs = [*5 勾选, *run_inputs(34)]：按位置统一解包
-            enables, (base, model_name, key_value, tokenizer_mode, tokenizer_custom), fields = list(values[:5]), values[5:10], values[10:]
+            enables, (base, model_name, key_value, tok_use_builtin, tok_builtin_name, tok_custom), fields = list(values[:5]), values[5:11], values[11:]
             logs: list[str] = []
 
             def on_progress(event: ProgressEvent) -> None:
@@ -1213,7 +1236,7 @@ def build_demo(service: AcceptanceService):
                     pass
 
             try:
-                keys = _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
+                keys = _prepare(enables, base, model_name, key_value, tok_use_builtin, tok_builtin_name, tok_custom, *fields)
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
                 logs.append(f"✗ 参数校验失败：{exc}")
@@ -1228,9 +1251,9 @@ def build_demo(service: AcceptanceService):
             return _render(logs, stage)
 
         def save_click(path_value: str, *values: Any):
-            enables, (base, model_name, key_value, tokenizer_mode, tokenizer_custom), fields = list(values[:5]), values[5:10], values[10:]
+            enables, (base, model_name, key_value, tok_use_builtin, tok_builtin_name, tok_custom), fields = list(values[:5]), values[5:11], values[11:]
             try:
-                _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
+                _prepare(enables, base, model_name, key_value, tok_use_builtin, tok_builtin_name, tok_custom, *fields)
                 target = service.config.save(path_value or _default_save_path(service.config))
                 return (
                     *_field_refresh(service.config),
@@ -1238,12 +1261,12 @@ def build_demo(service: AcceptanceService):
                     f"✅ 配置已保存：`{target}`\n下次启动复用：`ucm-accept --config {target}`",
                 )
             except Exception as exc:  # noqa: BLE001
-                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 保存失败：{exc}")
+                return (*_unchanged(40), _dataset_table_html(service.config), f"❌ 保存失败：{exc}")
 
         def export_click(*values: Any):
-            enables, (base, model_name, key_value, tokenizer_mode, tokenizer_custom), fields = list(values[:5]), values[5:10], values[10:]
+            enables, (base, model_name, key_value, tok_use_builtin, tok_builtin_name, tok_custom), fields = list(values[:5]), values[5:11], values[11:]
             try:
-                _prepare(enables, base, model_name, key_value, tokenizer_mode, tokenizer_custom, *fields)
+                _prepare(enables, base, model_name, key_value, tok_use_builtin, tok_builtin_name, tok_custom, *fields)
                 target = service.outputs_root / "ucm-accept.export.yaml"
                 service.config.save(target)
                 return str(target), f"✅ 已导出当前生效配置：`{target}`"
@@ -1252,29 +1275,29 @@ def build_demo(service: AcceptanceService):
 
         def import_click(file_obj: Any):
             if file_obj is None:
-                return (*_unchanged(39), _dataset_table_html(service.config), "⚠️ 未选择配置文件")
+                return (*_unchanged(40), _dataset_table_html(service.config), "⚠️ 未选择配置文件")
             path = file_obj.name if hasattr(file_obj, "name") else str(file_obj)
             try:
                 cfg = Config.load(path)
             except ConfigError as exc:
-                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 配置无效：{exc}")
+                return (*_unchanged(40), _dataset_table_html(service.config), f"❌ 配置无效：{exc}")
             except OSError as exc:
-                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 读取失败：{exc}")
+                return (*_unchanged(40), _dataset_table_html(service.config), f"❌ 读取失败：{exc}")
             try:
                 service.replace_config(cfg)
             except Exception as exc:  # noqa: BLE001
-                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 应用失败：{exc}")
+                return (*_unchanged(40), _dataset_table_html(service.config), f"❌ 应用失败：{exc}")
             return _apply_config_values(cfg, f"✅ 已导入并应用：`{path}`")
 
         def reset_click():
             try:
                 cfg = Config.load(overrides={"app": {"report_dir": str(service.outputs_root)}})
             except ConfigError as exc:
-                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 加载默认配置失败：{exc}")
+                return (*_unchanged(40), _dataset_table_html(service.config), f"❌ 加载默认配置失败：{exc}")
             try:
                 service.replace_config(cfg)
             except Exception as exc:  # noqa: BLE001
-                return (*_unchanged(39), _dataset_table_html(service.config), f"❌ 应用失败：{exc}")
+                return (*_unchanged(40), _dataset_table_html(service.config), f"❌ 应用失败：{exc}")
             return _apply_config_values(cfg, "♻️ 已恢复内置默认配置（输出目录保持不变）")
 
         def refresh_latest():
@@ -1317,10 +1340,16 @@ def build_demo(service: AcceptanceService):
                 return None, f"PDF 导出失败：{exc}"
 
         # ============== 事件绑定 ==============
+
+        def _tok_toggle(use_builtin: Any):
+            return (gr.update(visible=bool(builtin_tok) and bool(use_builtin)),
+                    gr.update(visible=(not builtin_tok) or (not use_builtin)))
+
         probe_btn.click(probe_click, inputs=[base_url, model, api_key], outputs=[probe_status])
+        tok_switch.change(_tok_toggle, inputs=[tok_switch], outputs=[tok_builtin, tok_custom])
         enables_list = [card_enable[key] for key in ITEM_KEYS]
         run_inputs = [
-            base_url, model, api_key, tokenizer_mode, tokenizer_custom,
+            base_url, model, api_key, tok_switch, tok_builtin, tok_custom,
             perf_parallel_card, perf_number_card, perf_input_len_card, perf_output_len_card,
             mt_scenarios_card, mt_parallel_card, mt_conv_card,
             sla_mode_card, sla_ttft_card, sla_tpot_card, sla_conc_card,

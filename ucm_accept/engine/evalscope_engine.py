@@ -245,35 +245,47 @@ class EvalScopeEngine(Engine):
             collected: list[str] = []
             deadline = time.monotonic() + timeout_s if timeout_s and timeout_s > 0 else None
             timed_out = False
-            while True:
-                try:
-                    item = lines.get(timeout=0.25)
-                except queue.Empty:
-                    item = ""
-                if item is None:
-                    break
-                if item:
-                    clean = redact_secret(strip_ansi(item), effective_secret)
-                    log_file.write(clean)
-                    log_file.flush()
-                    if len(collected) < 100_000:
-                        collected.append(clean)
-                    stripped = clean.rstrip()
-                    if log and stripped and not stripped.startswith(("╭", "╰", "┌", "└", "├", "┃")):
-                        log(stripped[:600])
-                if cancel is not None and cancel.is_set():
-                    self._terminate(process)
-                    raise CancelledError("用户已取消，已终止 EvalScope 进程")
-                if deadline is not None and time.monotonic() > deadline:
-                    timed_out = True
-                    self._terminate(process)
-                    break
-
             try:
-                returncode = process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
+                while True:
+                    try:
+                        item = lines.get(timeout=0.25)
+                    except queue.Empty:
+                        item = ""
+                    if item is None:
+                        break
+                    if item:
+                        clean = redact_secret(strip_ansi(item), effective_secret)
+                        log_file.write(clean)
+                        log_file.flush()
+                        if len(collected) < 100_000:
+                            collected.append(clean)
+                        stripped = clean.rstrip()
+                        if log and stripped and not stripped.startswith(("╭", "╰", "┌", "└", "├", "┃")):
+                            log(stripped[:600])
+                    if cancel is not None and cancel.is_set():
+                        self._terminate(process)
+                        raise CancelledError("用户已取消，已终止 EvalScope 进程")
+                    if deadline is not None and time.monotonic() > deadline:
+                        timed_out = True
+                        self._terminate(process)
+                        break
+
+                try:
+                    returncode = process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self._terminate(process)
+                    returncode = -9
+            except KeyboardInterrupt:
+                # 进程级中断（Ctrl+C / 关闭终端）：终止子进程并转为可处理的取消语义，
+                # 由上层 _execute_one 的 finally 落盘报告
                 self._terminate(process)
-                returncode = -9
+                if cancel is not None:
+                    cancel.set()
+                raise CancelledError("执行被中断，已终止 EvalScope 进程") from None
+            finally:
+                # 任何异常退出路径都不允许留下孤儿子进程
+                if process.poll() is None:
+                    self._terminate(process)
             text = "".join(collected)
             if timed_out:
                 raise EvalScopeError(f"EvalScope 执行超时（{int(timeout_s)}s），详见 {log_path}")

@@ -4,6 +4,7 @@ import argparse
 import os
 import re
 import shutil
+import signal
 import sys
 from pathlib import Path
 
@@ -264,7 +265,8 @@ def _run_noninteractive(service: AcceptanceService, args: argparse.Namespace) ->
             print(f"单项结果：{item.name} · {STATUS_LABELS[item.status]}")
     except KeyboardInterrupt:
         service.cancel()
-        print(YELLOW("\n已中断验收。原始数据仍保留在输出目录。"))
+        service.shutdown(timeout=10.0)
+        print(YELLOW("\n已中断验收。报告与原始数据已保存到输出目录。"))
         return 130
     except UCMAcceptError as exc:
         print(RED(f"执行失败：{exc}"))
@@ -372,7 +374,10 @@ def _interactive(service: AcceptanceService, args: argparse.Namespace) -> int:
                     _print_report_summary(report, service.report_path())
             except KeyboardInterrupt:
                 service.cancel()
-                print(YELLOW("\n已中断当前验收。"))
+                service.shutdown(timeout=10.0)
+                report = service.current_report()
+                _print_report_summary(report, service.report_path())
+                print(YELLOW("\n已中断当前验收。报告与原始数据已保存到输出目录。"))
             except UCMAcceptError as exc:
                 print(RED(f"执行失败：{exc}"))
                 if "EvalScope" in str(exc):
@@ -462,6 +467,18 @@ def main(argv: list[str] | None = None) -> int:
         mock_profile=args.profile,
         mock_delay_ms=0 if args.fast else None,
     )
+    # SIGTERM（终端关闭 / kill）：停止当前任务、终止子进程并落盘报告
+    def _graceful(signum: int, _frame: object) -> None:
+        service.shutdown(timeout=10.0)
+        print(YELLOW("\n收到退出信号，验收已中断，报告与原始数据已保存到输出目录。"))
+        raise SystemExit(130)
+
+    for _sig in (signal.SIGTERM,):
+        try:
+            signal.signal(_sig, _graceful)
+        except (ValueError, OSError):  # noqa: BLE001 - 非主线程等场景忽略
+            pass
+
     if args.all or args.item or args.items:
         return _run_noninteractive(service, args)
     return _interactive(service, args)

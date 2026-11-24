@@ -102,9 +102,14 @@ button.danger{background:none;color:var(--red);font-size:12.5px;padding:6px 10px
 .ds-desc{font-size:11.5px;color:var(--muted);margin-top:2px}
 .hint{font-size:12px;color:var(--muted);line-height:1.6;margin:4px 0 10px}
 /* ---------- log / verdict / report ---------- */
-.log{width:100%;height:220px;overflow-y:auto;background:var(--bg);border:1px solid var(--line);border-radius:12px;
-  padding:10px 12px;font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;font-size:12px;line-height:1.55;
-  color:var(--ink);white-space:pre-wrap;word-break:break-all}
+.log{width:100%;height:240px;overflow-y:auto;background:#0d0d0d;border:1px solid var(--line);border-radius:12px;
+  padding:12px 14px;font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;font-size:12px;line-height:1.55;
+  color:#c8f0c8;white-space:pre-wrap;word-break:break-all;transition:height .5s var(--ease)}
+.log.collapsed{height:34px;overflow:hidden}
+.gear{position:absolute;top:18px;right:22px;width:34px;height:34px;border-radius:50%;background:var(--bg);
+  color:var(--muted-2);font-size:16px;border:1px solid var(--line)}
+.gear:hover{color:var(--ink);transform:rotate(45deg)}
+.report-meta{font-size:11.5px;color:var(--muted);margin-top:8px;font-family:'SF Mono',ui-monospace,Consolas,monospace}
 .verdict{display:flex;flex-direction:column;gap:4px}
 .verdict .label{font-size:11px;color:var(--muted);letter-spacing:.12em;font-weight:600}
 .verdict .value{font-size:26px;font-weight:700;letter-spacing:-.02em}
@@ -134,8 +139,21 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;padding:28px 0 8px}
   </div>
 
   <!-- 端点 -->
-  <div class="card">
-    <div class="row">
+  <div class="card" style="position:relative">
+    <button class="gear" onclick="toggleGear()" title="报告与配置">⚙</button>
+    <div id="gear-panel" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+      <div class="row">
+        <div style="flex:2"><label class="field">报告标题</label><input type="text" id="adv-report-title"></div>
+        <div><label class="field">客户/公司名称</label><input type="text" id="adv-report-company"></div>
+        <div><label class="field">测试执行人</label><input type="text" id="adv-report-operator"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div style="flex:2"><label class="field">配置保存路径</label><input type="text" id="save-path" value="./ucm-accept.user.yaml"></div>
+        <div style="flex:0"><button class="ghost" onclick="saveConfig()">保存到配置文件</button></div>
+      </div>
+      <div id="save-status" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+    </div>
+    <div class="row" style="margin-top:14px">
       <div style="flex:1.4"><label class="field">服务地址</label>
         <input type="text" id="base_url" placeholder="http://127.0.0.1:8000/v1"></div>
       <div><label class="field">模型名称 <span style="color:#aeaeb2">（即服务拉起时的 --served-model-name）</span></label>
@@ -163,49 +181,29 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;padding:28px 0 8px}
   <div class="actions">
     <button class="primary" id="btn-run" onclick="runSelected()">执行勾选的验收测试</button>
     <button class="ghost" id="btn-cancel" onclick="cancelRun()" style="display:none">停止当前任务</button>
-    <button class="ghost" onclick="refreshReport(true)">查看最新报告</button>
-    <button class="ghost" onclick="window.open('/api/report/download')">下载报告</button>
+    <button class="ghost" onclick="window.open('/api/report/download')">导出 HTML</button>
+    <button class="ghost" onclick="exportPdf()">导出 PDF</button>
   </div>
 
-  <div class="grid2" style="margin-top:18px">
-    <div class="card" style="margin-top:0">
-      <label class="field">实时日志</label>
-      <div class="log" id="log"></div>
+  <div class="card verdict" style="margin-top:18px">
+    <div class="label" id="verdict-label">验收结论</div>
+    <div class="value" id="verdict-value" style="color:#6e6e73">尚未执行</div>
+    <ul id="verdict-reasons"></ul>
+    <div id="verdict-meta" style="font-size:11.5px;color:var(--muted);margin-top:6px"></div>
+    <div id="report-path" style="font-size:11.5px;color:var(--muted);margin-top:6px;font-family:'SF Mono',ui-monospace,Consolas,monospace"></div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <label class="field" style="margin:0">执行日志</label>
+      <button class="link" id="log-toggle" onclick="toggleLog()">折叠</button>
     </div>
-    <div class="card verdict" style="margin-top:0">
-      <div class="label" id="verdict-label">验收结论</div>
-      <div class="value" id="verdict-value" style="color:#6e6e73">尚未执行</div>
-      <ul id="verdict-reasons"></ul>
-      <div id="verdict-meta" style="font-size:11.5px;color:var(--muted);margin-top:6px"></div>
-    </div>
+    <div class="log" id="log"></div>
   </div>
 
   <div class="section-title">验收报告 <small>报告内嵌图表与原始命令，可离线归档</small></div>
   <div id="report-wrap" class="card" style="padding:0;overflow:hidden">
     <div class="empty-report" style="border:none;border-radius:0">执行测试后，这里会显示完整验收报告。</div>
-  </div>
-
-  <div class="section-title">高级配置 <small>低频参数与配置文件管理</small></div>
-  <div class="card" id="advanced">
-    <div class="row">
-      <div><label class="field">perf 数据集</label><input type="text" id="adv-perf-dataset"></div>
-      <div class="narrow"><label class="field">预热请求数</label><input type="number" id="adv-warmup" value="0"></div>
-      <div class="narrow"><label class="field">请求超时（秒）</label><input type="number" id="adv-timeout" value="180"></div>
-      <div class="narrow"><label class="field">多轮最少轮次</label><input type="number" id="adv-mt-min"></div>
-      <div class="narrow"><label class="field">多轮最多轮次</label><input type="number" id="adv-mt-max"></div>
-      <div class="narrow"><label class="field">SLA 搜索下限</label><input type="number" id="adv-sla-lower"></div>
-      <div><label class="field">Agent 数据集</label><input type="text" id="adv-agent-dataset"></div>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <div style="flex:2"><label class="field">报告标题</label><input type="text" id="adv-report-title"></div>
-      <div><label class="field">客户/公司名称</label><input type="text" id="adv-report-company"></div>
-      <div><label class="field">测试执行人</label><input type="text" id="adv-report-operator"></div>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <div style="flex:2"><label class="field">配置保存路径</label><input type="text" id="save-path" value="./ucm-accept.user.yaml"></div>
-      <div style="flex:0"><button class="ghost" onclick="saveConfig()">保存到配置文件</button></div>
-    </div>
-    <div id="save-status" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
   </div>
 
   <footer>UCM Inference Acceleration Acceptance · v<span id="ver"></span> · 测试由 EvalScope 原生执行</footer>
@@ -260,8 +258,7 @@ async function initState() {
   document.getElementById('tok_custom').value = tok.custom || '';
   tokToggle();
   renderItems();
-  renderAdvanced();
-  renderReport(STATE.report);
+  refreshReport();
   setRunning(STATE.running);
 }
 
@@ -286,7 +283,6 @@ function renderItems() {
       </div></div>
       <div class="status-col" id="status-${key}"><span class="pill pending">待执行</span></div>
       <label class="switch"><input type="checkbox" class="item-enable" data-key="${key}" ${sel.has(key) ? 'checked' : ''}><span class="track"></span></label>
-      <button class="tiny" onclick="runOne('${key}')">运行</button>
     </div>
     <button class="link" onclick="toggleConfig('${key}')">配置</button>
     <div class="config-panel" id="panel-${key}">${panelHtml(key, perfGroups, mt, sla, acc, agent)}</div>
@@ -317,6 +313,8 @@ function panelHtml(key, groups, mt, sla, acc, agent) {
     <div class="row">
       <div class="narrow"><label class="field">会话组数（--number）</label><input type="number" id="mt-conversations" value="${mt.conversations}"></div>
       <div class="narrow"><label class="field">并发会话数</label><input type="number" id="mt-parallel" value="${mt.parallel}"></div>
+      <div class="narrow"><label class="field">最少轮次</label><input type="number" id="mt-min" value="${mt.min_turns}"></div>
+      <div class="narrow"><label class="field">最多轮次</label><input type="number" id="mt-max" value="${mt.max_turns}"></div>
     </div>`;
   if (key === 'sla') return `
     <div class="hint">达标判定完全由 EvalScope --sla-auto-tune 完成（avg / P99 任意档位组合，全部满足才算达标）；留空的档位不参与判定。</div>
@@ -326,6 +324,7 @@ function panelHtml(key, groups, mt, sla, acc, agent) {
       <div class="narrow"><label class="field">命中率 %</label><input type="number" id="sla-ratio" value="${sla.prefix_ratio}"></div>
       <div class="narrow"><label class="field">前缀种数</label><input type="number" id="sla-count" value="${sla.prefix_count}"></div>
       <div class="narrow"><label class="field">搜索并发上限</label><input type="number" id="sla-upper" value="${sla.upper}"></div>
+      <div class="narrow"><label class="field">搜索下限</label><input type="number" id="sla-lower" value="${sla.lower}"></div>
     </div>
     <div class="row" style="margin-top:8px">
       <div><label class="field">TTFT avg ≤（秒）</label><input type="number" id="sla-avg-ttft" value="${sla.thresholds.avg_ttft_s ?? ''}"></div>
@@ -350,6 +349,7 @@ function panelHtml(key, groups, mt, sla, acc, agent) {
     <div class="row">
       <div><label class="field">目标上下文（tokens）</label><input type="number" id="agent-context" value="${agent.context}"></div>
       <div class="narrow"><label class="field">持续时长（分钟）</label><input type="number" id="agent-duration" value="${agent.duration}"></div>
+      <div><label class="field">Agent 数据集</label><input type="text" id="agent-dataset" value="${agent.dataset_name}"></div>
     </div>`;
 }
 
@@ -374,14 +374,21 @@ function toggleConfig(key) {
   item.querySelector('[onclick^="toggleConfig"]').textContent = open ? '收起配置' : '配置';
 }
 
-function renderAdvanced() {
-  document.getElementById('adv-perf-dataset').value = STATE.perf.dataset;
-  document.getElementById('adv-warmup').value = STATE.perf.warmup;
-  document.getElementById('adv-timeout').value = STATE.perf.timeout_s;
-  document.getElementById('adv-mt-min').value = STATE.multiturn.min_turns;
-  document.getElementById('adv-mt-max').value = STATE.multiturn.max_turns;
-  document.getElementById('adv-sla-lower').value = STATE.sla.lower;
-  document.getElementById('adv-agent-dataset').value = STATE.agent.dataset_name;
+function toggleGear() {
+  const p = document.getElementById('gear-panel');
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+}
+function toggleLog() {
+  const el = document.getElementById('log');
+  const collapsed = el.classList.toggle('collapsed');
+  document.getElementById('log-toggle').textContent = collapsed ? '展开' : '折叠';
+}
+function exportPdf() {
+  toast('正在生成 PDF…');
+  fetch('/api/report/export/pdf').then(r => r.json()).then(d => {
+    if (d.pdf) toast('PDF 已生成：' + d.pdf);
+    else toast(d.detail || 'PDF 导出失败');
+  }).catch(() => toast('PDF 导出失败'));
 }
 
 function collectPayload(items) {
@@ -399,21 +406,20 @@ function collectPayload(items) {
                 builtin: val('tok_builtin'), custom: val('tok_custom')},
     items,
     perf: {groups,
-           dataset: val('perf-dataset') || val('adv-perf-dataset'),
-           warmup: num('perf-warmup') || num('adv-warmup'),
-           timeout_s: num('perf-timeout') || num('adv-timeout')},
+           dataset: val('perf-dataset'), warmup: num('perf-warmup'),
+           timeout_s: num('perf-timeout')},
     multiturn: {scenarios: [...document.querySelectorAll('.mt-scenario:checked')].map(el => el.dataset.key),
-                conversations: num('mt-conversations') || 12, parallel: num('mt-parallel') || 4},
+                conversations: num('mt-conversations') || 12, parallel: num('mt-parallel') || 4,
+                min_turns: num('mt-min') || 2, max_turns: num('mt-max') || 5},
     sla: {input: num('sla-input'), output: num('sla-output'),
           prefix_ratio: num('sla-ratio'), prefix_count: num('sla-count'), upper: num('sla-upper'),
+          lower: num('sla-lower'),
           avg_ttft_s: num('sla-avg-ttft'), avg_tpot_ms: num('sla-avg-tpot'),
           p99_ttft_s: num('sla-p99-ttft'), p99_tpot_ms: num('sla-p99-tpot')},
     accuracy: {datasets: [...document.querySelectorAll('.acc-dataset:checked')].map(el => el.dataset.key),
                runs: num('acc-runs') || 2, limit: num('acc-limit')},
-    agent: {context: num('agent-context'), duration: num('agent-duration')},
-    advanced: {mt_min_turns: num('adv-mt-min'), mt_max_turns: num('adv-mt-max'),
-               auto_tune_lower: num('adv-sla-lower'),
-               agent_dataset_name: val('adv-agent-dataset')},
+    agent: {context: num('agent-context'), duration: num('agent-duration'),
+            dataset_name: val('agent-dataset')},
     report: {title: val('adv-report-title'), company: val('adv-report-company'),
              operator: val('adv-report-operator')},
   };
@@ -450,7 +456,7 @@ function listenEvents() {
     } else if (d.type === 'status') {
       refreshStatus();
     } else if (d.type === 'done') {
-      refreshStatus(); refreshReport(true); setRunning(false);
+      refreshStatus(); refreshReport(); setRunning(false);
       if (d.conclusion) toast(`验收完成：${d.conclusion}`);
     } else if (d.type === 'error') {
       setRunning(false); toast('执行失败：' + (d.message || '')); refreshStatus();
@@ -471,7 +477,6 @@ async function startRun(items) {
   listenEvents();
 }
 function runSelected() { startRun(checkedItems()); }
-function runOne(key) { startRun([key]); }
 
 async function cancelRun() {
   await fetch('/api/cancel', {method: 'POST'});
@@ -519,14 +524,27 @@ async function refreshStatus() {
   setRunning(STATE.running);
 }
 
+let lastReportRun = null;
 function refreshReport(manual) {
+  const rep = (STATE && STATE.report) || {};
   const wrap = document.getElementById('report-wrap');
+  const hasFrame = !!document.getElementById('report-frame');
   fetch('/api/report').then(r => { if (!r.ok) throw 0; return r.text(); }).then(html => {
-    wrap.innerHTML = `<iframe class="report-frame" title="验收报告"></iframe>`;
-    wrap.querySelector('iframe').srcdoc = html;
+    if (!hasFrame) {
+      wrap.innerHTML = '<iframe class="report-frame" id="report-frame" title="验收报告"></iframe>';
+    }
+    const frame = document.getElementById('report-frame');
+    // 仅在报告对应任务变化时重载，避免状态轮询期间反复闪烁
+    const runChanged = rep.run_id && rep.run_id !== lastReportRun;
+    if (!frame.srcdoc || runChanged || manual === true) {
+      frame.srcdoc = html;
+      lastReportRun = rep.run_id || null;
+    }
+    const meta = document.getElementById('report-path');
+    if (meta && rep.output_dir) meta.textContent = '报告目录：' + rep.output_dir;
   }).catch(() => {
     if (manual) toast('尚未生成报告');
-    if (!wrap.querySelector('.empty-report'))
+    if (!hasFrame && !wrap.querySelector('.empty-report'))
       wrap.innerHTML = '<div class="empty-report" style="border:none;border-radius:0">执行测试后，这里会显示完整验收报告。</div>';
   });
 }

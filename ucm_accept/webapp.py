@@ -101,10 +101,9 @@ def _apply_payload(service: AcceptanceService, payload: dict[str, Any]) -> list[
     if not groups:
         raise UCMAcceptError("基础性能测试至少需要一组压测数据")
     config.set("perf.groups", groups)
-    advanced = payload.get("advanced") or {}
-    config.set("perf.dataset", str(advanced.get("perf_dataset", "random")).strip() or "random")
-    config.set("perf.warmup_num", max(0, int(advanced.get("warmup", 0) or 0)))
-    config.set("endpoint.timeout_s", float(advanced.get("timeout_s", 180) or 180))
+    config.set("perf.dataset", str(perf.get("dataset", "random")).strip() or "random")
+    config.set("perf.warmup_num", max(0, int(perf.get("warmup", 0) or 0)))
+    config.set("endpoint.timeout_s", float(perf.get("timeout_s", 180) or 180))
 
     mt = payload.get("multiturn") or {}
     presets = config.get("multiturn.scenarios", {}) or {}
@@ -113,8 +112,8 @@ def _apply_payload(service: AcceptanceService, payload: dict[str, Any]) -> list[
     config.set("multiturn.scenarios_selected", selected)
     config.set("multiturn.conversations", max(1, int(mt.get("conversations", 12))))
     config.set("multiturn.parallel", max(1, int(mt.get("parallel", 4))))
-    config.set("multiturn.min_turns", max(1, int(advanced.get("mt_min_turns", 2))))
-    config.set("multiturn.max_turns", max(1, int(advanced.get("mt_max_turns", 5))))
+    config.set("multiturn.min_turns", max(1, int(mt.get("min_turns") or 2)))
+    config.set("multiturn.max_turns", max(1, int(mt.get("max_turns") or 5)))
 
     sla = payload.get("sla") or {}
     config.set("sla.input_length", int(sla.get("input", 65536)))
@@ -124,7 +123,7 @@ def _apply_payload(service: AcceptanceService, payload: dict[str, Any]) -> list[
     config.set("sla.prefix_count", max(1, int(sla.get("prefix_count", 8))))
     config.set("sla.target.concurrency", max(1, int(sla.get("upper", 256))))
     config.set("sla.auto_tune.upper", max(1, int(sla.get("upper", 256))))
-    config.set("sla.auto_tune.lower", max(1, int(advanced.get("auto_tune_lower", 2))))
+    config.set("sla.auto_tune.lower", max(1, int(sla.get("lower") or 2)))
     for key, field_name in (
         ("avg_ttft_s", "avg_ttft_s"),
         ("avg_tpot_ms", "avg_tpot_ms"),
@@ -151,7 +150,8 @@ def _apply_payload(service: AcceptanceService, payload: dict[str, Any]) -> list[
     agent = payload.get("agent") or {}
     config.set("agent.context_required", int(agent.get("context", 262144)))
     config.set("agent.duration_s", max(1, int(agent.get("duration", 15))) * 60)
-    config.set("agent.dataset_name", str(advanced.get("agent_dataset_name", "AgentX-claudecode")).strip())
+    agent = payload.get("agent") or {}
+    config.set("agent.dataset_name", str(agent.get("dataset_name", "AgentX-claudecode")).strip())
 
     report_cfg = payload.get("report") or {}
     config.set("report.title", str(report_cfg.get("title", "") or "").strip())
@@ -178,6 +178,7 @@ def create_app(service: AcceptanceService) -> FastAPI:
             "reasons": report.reasons,
             "mode": report.mode,
             "started_at": report.started_at,
+            "output_dir": str(report.output_dir or ""),
             "items": {
                 key: {"status": item.status.value, "summary": item.summary or ""}
                 for key, item in report.items.items()
@@ -402,6 +403,16 @@ def create_app(service: AcceptanceService) -> FastAPI:
         except (OSError, ConfigError) as exc:
             raise HTTPException(status_code=400, detail=f"保存失败：{exc}") from exc
         return {"saved": str(saved)}
+
+    @app.get("/api/report/export/pdf")
+    def report_pdf() -> dict[str, Any]:
+        try:
+            path = service.export_pdf()
+        except UCMAcceptError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - PDF 后端缺失等环境问题
+            raise HTTPException(status_code=500, detail=f"PDF 导出失败：{exc}") from exc
+        return {"pdf": str(path)}
 
     @app.get("/api/config/export")
     def config_export() -> Response:

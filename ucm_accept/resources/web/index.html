@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%230071e3%22%2F%3E%3Cpath%20d%3D%22M12%2041a20%2020%200%201%201%2040%200%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%224.5%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M32%2041l8-8%22%20stroke%3D%22%23fff%22%20stroke-width%3D%224.5%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E">
 <title>UCM 推理加速验收工具</title>
 <style>
 :root{
@@ -413,14 +414,41 @@ function toggleCompare() {
   if (show && !document.querySelector('#compare-rows .cmp-row')) addCompareRow();
 }
 
+function bindSelectChange(select) {
+  const row = select.closest('.cmp-row');
+  const input = row.querySelector('.cmp-file');
+  const text = row.querySelector('.file-btn-text');
+  const btn = row.querySelector('.file-btn');
+  if (select.value) {
+    input.value = '';
+    text.textContent = '上传 report.json';
+    btn.classList.remove('has-file');
+    btn.style.opacity = '0.45';
+    btn.style.pointerEvents = 'none';
+  } else {
+    btn.style.opacity = '';
+    btn.style.pointerEvents = '';
+  }
+}
+
 function bindFileButton(row) {
   const input = row.querySelector('.cmp-file');
   const text = row.querySelector('.file-btn-text');
   const btn = row.querySelector('.file-btn');
+  const select = row.querySelector('.cmp-source');
+  // 下拉与上传二选一：选文件清空并禁用下拉；选下拉清空并禁用上传
   input.addEventListener('change', () => {
     const file = input.files && input.files[0];
     text.textContent = file ? file.name : '上传 report.json';
     btn.classList.toggle('has-file', !!file);
+    select.value = '';  // 二选一：选文件即清空下拉
+  });
+  select.addEventListener('change', () => {
+    if (select.value) {
+      input.value = '';  // 二选一：选下拉即清空上传文件
+      text.textContent = '上传 report.json';
+      btn.classList.remove('has-file');
+    }
   });
 }
 
@@ -436,7 +464,7 @@ function addCompareRow() {
       <div class="cmp-row" style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
         <span class="dot" style="background:${color};width:10px;height:10px;border-radius:50%;flex:none"></span>
         <input type="text" class="cmp-label" placeholder="标签（如 UCM / 原生）" style="width:170px">
-        <select class="cmp-source" style="flex:1">
+        <select class="cmp-source" onchange="bindSelectChange(this)">
           <option value="">— 选择已有结果 —</option>${options}
         </select>
         <label class="file-btn" style="flex:1">

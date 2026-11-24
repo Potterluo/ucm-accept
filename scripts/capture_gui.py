@@ -39,15 +39,9 @@ def wait_ready(seconds: int = 60) -> bool:
 
 
 def _open_accordion(page, scope: str) -> None:
-    """展开某测试项行内的「配置」折叠区（兼容不同 Gradio 版本的 DOM）。"""
-    node = page.locator(scope)
-    for sel in ("button", "[role='button']", ".label-wrap", "summary"):
-        candidate = node.locator(sel).first
-        if candidate.count():
-            candidate.click()
-            page.wait_for_timeout(800)
-            return
-    node.click()
+    """展开某测试项行内的「配置」面板。"""
+    page.locator(scope).first.click()
+    page.wait_for_timeout(800)
 
 
 def capture(out_dir: Path) -> list[dict]:
@@ -55,7 +49,7 @@ def capture(out_dir: Path) -> list[dict]:
 
     shots = [
         ("home", "首页 — 服务地址、模型路径与五项验收测试列表", None),
-        ("item-config", "测试项配置 — 展开项内「配置」调整该项参数", "#card-multiturn .ucm-item-config"),
+        ("item-config", "测试项配置 — 展开项内「配置」调整该项参数", "#item-multiturn button.link"),
         ("report", "验收报告 — 自包含 HTML，离线归档与分发", None),
     ]
     pages = []
@@ -63,7 +57,7 @@ def capture(out_dir: Path) -> list[dict]:
         browser = p.chromium.launch(args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1440, "height": 1050}, device_scale_factor=1.5)
         page.goto(BASE_URL, wait_until="domcontentloaded")
-        page.wait_for_selector(".ucm-hero", timeout=30000)
+        page.wait_for_selector(".hero", timeout=30000)
         page.wait_for_timeout(2500)
         for name, caption, click_sel in shots:
             if click_sel:

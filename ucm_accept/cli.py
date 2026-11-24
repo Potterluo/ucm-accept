@@ -80,7 +80,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="只执行指定测试项，逗号分隔，可用编号或名称，例如 perf,sla 或 1,3",
     )
     parser.add_argument("--save-config", help="把当前生效配置另存为 YAML 后退出（API Key 不落盘）")
-    parser.add_argument("--scenario", choices=["dialogue", "code", "office"], help="多轮对话场景预设")
+    try:
+        _scenario_keys = list((load_config(None).get("multiturn.scenarios", {}) or {}).keys())
+    except Exception:  # noqa: BLE001 - 配置不可读时退化为自由文本
+        _scenario_keys = None
+    parser.add_argument(
+        "--scenario",
+        choices=_scenario_keys,
+        help="多轮对话场景预设（来自 config multiturn.scenarios）",
+    )
     parser.add_argument("--all", action="store_true", help="按配置 run.items 的范围顺序执行验收")
     parser.add_argument("--sla-mode", choices=["verify", "auto_tune"], help="覆盖 SLA 模式")
     parser.add_argument("--report", help="将本次 HTML 报告另存到指定路径")
@@ -443,9 +451,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.doctor:
         return _doctor(config, args)
     if args.gui:
-        from .gui import main as gui_main
+        from .webapp import main as web_main
 
-        return gui_main(
+        return web_main(
             config=config,
             mode="mock" if args.mock else "live",
             mock_profile=args.profile,

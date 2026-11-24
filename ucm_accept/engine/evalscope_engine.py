@@ -381,6 +381,8 @@ class EvalScopeEngine(Engine):
             )
             if params.prefix_length > 0:
                 argv.extend(["--prefix-length", str(params.prefix_length)])
+                if params.prefix_count > 1:
+                    argv.extend(["--prefix-count", str(params.prefix_count)])
         if params.warmup_num > 0:
             argv.extend(["--warmup-num", str(params.warmup_num)])
         argv.extend([str(arg) for arg in params.extra_args])
@@ -440,11 +442,12 @@ class EvalScopeEngine(Engine):
 
     # -------------------------------------------------------------- multiturn
     def _multiturn_argv(self, endpoint: Endpoint, params: MultiturnParams, output_dir: Path) -> list[str]:
+        builtin = bool(params.dataset_name)
         mapping = self._base_mapping(endpoint, output_dir)
         mapping.update(
             {
-                "dataset": "custom_multi_turn",
-                "dataset_path": str(params.dataset_path),
+                "dataset": params.dataset_name or "custom_multi_turn",
+                "dataset_path": str(params.dataset_path or ""),
                 "parallel": params.parallel,
                 "number": params.conversations,
                 "max_turns": params.max_turns,
@@ -464,9 +467,11 @@ class EvalScopeEngine(Engine):
             "--api",
             "openai",
             "--dataset",
-            "custom_multi_turn",
-            "--dataset-path",
-            str(params.dataset_path),
+            params.dataset_name or "custom_multi_turn",
+        ]
+        if not builtin:
+            argv.extend(["--dataset-path", str(params.dataset_path)])
+        argv.extend([
             "--multi-turn",
             "--min-turns",
             str(params.min_turns),
@@ -484,7 +489,7 @@ class EvalScopeEngine(Engine):
             "--no-timestamp",
             "--total-timeout",
             str(params.request_timeout_s),
-        ]
+        ])
         if endpoint.api_key:
             argv.extend(["--api-key", endpoint.api_key])
         argv.extend([str(arg) for arg in params.extra_args])
@@ -498,8 +503,9 @@ class EvalScopeEngine(Engine):
         log: LogFn | None = None,
         cancel: threading.Event | None = None,
     ) -> MultiturnDetail:
-        if not params.dataset_path.exists():
-            raise AssetError(f"多轮对话预设数据不存在：{params.dataset_path}")
+        if not params.dataset_name:
+            if params.dataset_path is None or not params.dataset_path.exists():
+                raise AssetError(f"多轮对话预设数据不存在：{params.dataset_path}")
         output_dir.mkdir(parents=True, exist_ok=True)
         argv = self._multiturn_argv(endpoint, params, output_dir)
         result = self._run(
@@ -778,15 +784,17 @@ class EvalScopeEngine(Engine):
 
     # -------------------------------------------------------------- SLA native
     def _sla_argv(self, endpoint: Endpoint, params: SlaNativeParams, output_dir: Path) -> list[str]:
-        sla_params = json.dumps(
-            [
-                {
-                    "p90_ttft": f"<{params.ttft_p90_ms:g}ms",
-                    "p90_tpot": f"<{params.tpot_p90_ms:g}ms",
-                }
-            ],
-            ensure_ascii=False,
-        )
+        # EvalScope SLA 指标：avg_latency/avg_ttft/avg_tpot/p99_latency/p99_ttft/p99_tpot
+        # 阈值键单位：ttft 秒、tpot 毫秒；同一组内全部满足才算达标
+        unit = {"avg_ttft_s": "s", "p99_ttft_s": "s", "avg_tpot_ms": "ms", "p99_tpot_ms": "ms"}
+        criteria: dict[str, str] = {}
+        for key, value in params.thresholds.items():
+            if not value or key not in unit:
+                continue
+            criteria[key.removesuffix("_s").removesuffix("_ms")] = f"<= {value:g}{unit[key]}"
+        if not criteria:
+            raise EvalScopeError("SLA 阈值未配置（avg_ttft_s / avg_tpot_ms / p99_ttft_s / p99_tpot_ms 至少一项）")
+        sla_params = json.dumps([criteria], ensure_ascii=False)
         mapping = self._base_mapping(endpoint, output_dir)
         mapping.update(
             {
@@ -821,9 +829,9 @@ class EvalScopeEngine(Engine):
             "--max-prompt-length",
             str(params.target_context),
             "--min-tokens",
-            "256",
+            str(params.output_tokens),
             "--max-tokens",
-            "256",
+            str(params.output_tokens),
             "--sla-auto-tune",
             "--sla-variable",
             params.variable,
@@ -843,6 +851,11 @@ class EvalScopeEngine(Engine):
         ]
         if endpoint.api_key:
             argv.extend(["--api-key", endpoint.api_key])
+        prefix_length = round(params.target_context * max(0.0, min(1.0, params.prefix_ratio)))
+        if params.prefix_ratio > 0 and prefix_length > 0:
+            argv.extend(["--prefix-length", str(prefix_length)])
+            if params.prefix_count > 1:
+                argv.extend(["--prefix-count", str(params.prefix_count)])
         argv.extend([str(arg) for arg in params.extra_args])
         return argv
 
@@ -882,23 +895,14 @@ class EvalScopeEngine(Engine):
                 f"EvalScope 未探测目标并发 {params.upper}；原生建议并发为 "
                 f"{recommended if recommended is not None else '无'}"
             )
-        if target_point and not target_met:
-            if target_point.ttft_p90_ms >= params.ttft_p90_ms:
-                gaps.append(
-                    f"TTFT.P90 实测 {target_point.ttft_p90_ms / 1000:.2f}s，"
-                    f"未达到 <{params.ttft_p90_ms / 1000:.2f}s"
-                )
-            if target_point.tpot_p90_ms >= params.tpot_p90_ms:
-                gaps.append(
-                    f"TPOT.P90 实测 {target_point.tpot_p90_ms:.1f}ms，"
-                    f"未达到 <{params.tpot_p90_ms:.1f}ms"
-                )
         detail = SlaDetail(
             target=SlaTarget(
-                context_length=params.target_context,
+                input_length=params.target_context,
+                output_tokens=params.output_tokens,
+                prefix_ratio=params.prefix_ratio,
+                prefix_count=params.prefix_count,
                 concurrency=params.upper,
-                ttft_p90_ms=params.ttft_p90_ms,
-                tpot_p90_ms=params.tpot_p90_ms,
+                thresholds=params.thresholds,
             ),
             strategy="native",
             target_met=target_met,
@@ -908,7 +912,7 @@ class EvalScopeEngine(Engine):
             best=best,
             gaps=gaps,
             note=(
-                "数值来自 EvalScope 原生 `perf --sla-auto-tune`，阈值使用 p90_ttft / p90_tpot；"
+                "数值与达标判定均来自 EvalScope 原生 `perf --sla-auto-tune`（avg / p99 口径）；"
                 "建议并发为 EvalScope 原生搜索结果，可原样复现。"
             ),
             output_dir=str(output_dir),

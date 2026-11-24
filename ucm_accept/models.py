@@ -168,10 +168,7 @@ class PerfPoint:
             return 1.0
         return self.success_requests / self.requests
 
-    def meets(self, ttft_p90_ms: float, tpot_p90_ms: float) -> bool:
-        return self.ttft_p90_ms > 0 and self.tpot_p90_ms > 0 and (
-            self.ttft_p90_ms < ttft_p90_ms and self.tpot_p90_ms < tpot_p90_ms
-        )
+
 
     def to_dict(self) -> dict[str, Any]:
         return to_jsonable(self)
@@ -201,10 +198,12 @@ class PerfDetail:
 
 @dataclass
 class SlaTarget:
-    context_length: int
+    input_length: int
+    output_tokens: int
+    prefix_ratio: float
+    prefix_count: int
     concurrency: int
-    ttft_p90_ms: float
-    tpot_p90_ms: float
+    thresholds: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return to_jsonable(self)

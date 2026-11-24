@@ -110,10 +110,8 @@ button.danger{background:none;color:var(--red);font-size:12.5px;padding:6px 10px
 .hint{font-size:12px;color:var(--muted);line-height:1.6;margin:4px 0 10px}
 /* ---------- log / verdict / report ---------- */
 .log-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.log{width:100%;height:70vh;overflow:auto;border:1px solid var(--line);border-radius:12px;
-  padding:12px 14px;font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;font-size:11.5px;line-height:1.5;
-  white-space:pre;transition:height .5s var(--ease),background .5s var(--ease),color .5s var(--ease);
-  background:var(--log-bg,#0d1117);color:var(--log-fg,#e6edf3)}
+.log{width:100%;height:70vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;font-size:11.5px;line-height:1.5;white-space:pre;transition:height .5s var(--ease),background .5s var(--ease),color .5s var(--ease);background:var(--log-bg,#0d1117);color:var(--log-fg,#e6edf3)}
+.log div{white-space:pre}
 .log.collapsed{height:36px;overflow:hidden}
 .gear{position:absolute;top:18px;right:22px;width:34px;height:34px;border-radius:50%;background:var(--bg);
   color:var(--muted-2);font-size:16px;border:1px solid var(--line)}
@@ -213,6 +211,7 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;padding:28px 0 8px}
       <label class="field" style="margin:0">执行日志</label>
       <button class="link" id="log-toggle" onclick="toggleLog()">折叠</button>
       <button class="link" onclick="copyLog()">复制</button>
+      <button class="link" onclick="window.open('/api/log/download')">下载全量日志</button>
       <span style="flex:1"></span>
       <label class="field" style="margin:0">配色</label>
       <select id="log-theme" onchange="applyLogTheme(this.value)" style="width:auto;padding:5px 10px;font-size:12px">
@@ -293,6 +292,15 @@ async function initState() {
   await refreshStatus();   // 结论卡与报告同源初始化（不再显示静态“尚未执行”）
   refreshReport();
   setRunning(STATE.running);
+  // 恢复日志现场（进程重启后显示最近一次执行的日志）
+  try {
+    const r = await fetch('/api/log?offset=0');
+    const d = await r.json();
+    appendLogLines(d.lines || []);
+    logOffset = d.total;
+    updateLogBadge();
+  } catch (e) { /* 忽略 */ }
+  if (STATE.running) pollLog();
 }
 
 function tokToggle() {
@@ -621,37 +629,36 @@ let logOffset = 0;  // 已接收的日志行数（增量拉取）
 
 let logTruncated = 0;  // DOM 截断掉的行数（完整内容始终在 /api/log）
 
-function appendLog(line) {
+function appendLogLines(newLines) {
+  if (!newLines.length) return;
   const log = document.getElementById('log');
-  log.textContent += line + '\n';
-  // DOM 上限：超过 4000 行时截去前半，保留最近内容（完整内容用复制/打包下载获取）
-  const lines = log.textContent.split('\n');
-  if (lines.length > 4000) {
-    logTruncated += lines.length - 2000;
-    log.textContent = '…（前 ' + logTruncated + ' 行已折叠，复制或打包下载可获取完整日志）\n' +
-      lines.slice(-2000).join('\n');
+  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  const frag = document.createDocumentFragment();
+  for (const line of newLines) {
+    const div = document.createElement('div');
+    div.textContent = line;
+    frag.appendChild(div);
   }
-  log.scrollTop = log.scrollHeight;
+  log.appendChild(frag);
+  // DOM 上限 1000 行（完整日志始终可通过复制 / 下载全量日志获取）
+  while (log.childElementCount > 1000) log.removeChild(log.firstElementChild);
+  if (nearBottom) log.scrollTop = log.scrollHeight;
   updateLogBadge();
 }
 
 function updateLogBadge() {
   const badge = document.getElementById('log-count');
   badge.style.display = '';
-  badge.textContent = logTruncated > 0
-    ? `共 ${logOffset + 1} 行 · 页面显示最近 ${logOffset + 1 - logTruncated} 行`
-    : `${logOffset} 行`;
+  badge.textContent = `${logOffset} 行（页面保留最近 1000 行）`;
 }
 
 async function copyLog() {
-  // 从后端拉全量（页面 DOM 是截断显示）
   try {
     const r = await fetch('/api/log?offset=0');
     const d = await r.json();
-    const text = (d.lines || []).join('\n');
-    await navigator.clipboard.writeText(text);
-    toast(`已复制完整日志（${(d.lines || []).length} 行）`);
-  } catch (e) { toast('复制失败，可用「打包下载」获取 run.log'); }
+    await navigator.clipboard.writeText((d.lines || []).join('\n'));
+    toast(`已复制全量日志（${(d.lines || []).length} 行）`);
+  } catch (e) { toast('复制失败，可点「下载全量日志」'); }
 }
 
 function stopPolling() {
@@ -667,9 +674,8 @@ function pollLog() {
         const d = await r.json();
         // total < offset 说明开始了新一轮执行：清屏重计
         if (d.total < logOffset) { logOffset = 0; document.getElementById('log').textContent = ''; }
-        (d.lines || []).forEach(line => appendLog(line));
+        appendLogLines(d.lines);
         logOffset = d.total;
-        updateLogBadge();
         await refreshStatus();
         if (!d.running) {
           stopPolling();

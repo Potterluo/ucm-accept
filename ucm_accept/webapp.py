@@ -175,6 +175,16 @@ def create_app(service: AcceptanceService) -> FastAPI:
         "log_lines": [],  # 当前执行的日志（轮询通道用）
         "error": None,
     }
+    # 页面重开 / 进程重启后恢复最近一次执行的日志现场
+    _last_log = find_latest_report(service.outputs_root)
+    if _last_log:
+        _run_log = _last_log.parent / "run.log"
+        if _run_log.exists():
+            try:
+                _lines = _run_log.read_text(encoding="utf-8").splitlines()
+                state["log_lines"] = [f"[恢复] {line}" for line in _lines[-2000:]]
+            except OSError:
+                pass
 
     def _report_snapshot() -> dict[str, Any]:
         report = service.current_report()
@@ -509,6 +519,15 @@ def create_app(service: AcceptanceService) -> FastAPI:
             content=json_path.read_bytes(),
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="report-{json_path.parent.name}.json"'},
+        )
+
+    @app.get("/api/log/download")
+    def log_download() -> Response:
+        text = "\n".join(state.get("log_lines", []))
+        return Response(
+            content=text,
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="ucm-run.log"'},
         )
 
     @app.get("/api/report/bundle")

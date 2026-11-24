@@ -90,9 +90,14 @@ def _apply_payload(service: AcceptanceService, payload: dict[str, Any]) -> list[
     groups = []
     for group in perf.get("groups") or []:
         ratio = float(group.get("prefix_ratio", 90) or 0)
+        raw_parallel = group.get("parallel", "8")
+        if isinstance(raw_parallel, (list, tuple)):  # 配置直填列表时原样接受
+            parallel_values = [int(v) for v in raw_parallel]
+        else:
+            parallel_values = [int(v) for v in str(raw_parallel).replace("，", ",").split(",") if str(v).strip()]
         groups.append(
             {
-                "parallel": [int(v) for v in str(group.get("parallel", "8")).replace("，", ",").split(",") if str(v).strip()],
+                "parallel": parallel_values,
                 "number": max(1, int(group.get("number", 64))),
                 "input": int(group.get("input", 65536)),
                 "output": int(group.get("output", 512)),

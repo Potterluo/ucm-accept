@@ -499,22 +499,39 @@ async function probe() {
 let pollTimer = null;
 let logOffset = 0;  // 已接收的日志行数（增量拉取）
 
+let logTruncated = 0;  // DOM 截断掉的行数（完整内容始终在 /api/log）
+
 function appendLog(line) {
   const log = document.getElementById('log');
   log.textContent += line + '\n';
-  // DOM 上限：超过 4000 行时截去前半，保留最近内容
+  // DOM 上限：超过 4000 行时截去前半，保留最近内容（完整内容用复制/打包下载获取）
   const lines = log.textContent.split('\n');
-  if (lines.length > 4000) log.textContent = lines.slice(-2000).join('\n');
+  if (lines.length > 4000) {
+    logTruncated += lines.length - 2000;
+    log.textContent = '…（前 ' + logTruncated + ' 行已折叠，复制或打包下载可获取完整日志）\n' +
+      lines.slice(-2000).join('\n');
+  }
   log.scrollTop = log.scrollHeight;
-  const badge = document.getElementById('log-count');
-  badge.style.display = '';
-  badge.textContent = `${lines.length - 1} 行`;
+  updateLogBadge();
 }
 
-function copyLog() {
-  const text = document.getElementById('log').textContent;
-  navigator.clipboard.writeText(text).then(() => toast('日志已复制到剪贴板'),
-    () => toast('复制失败，请手动选择'));
+function updateLogBadge() {
+  const badge = document.getElementById('log-count');
+  badge.style.display = '';
+  badge.textContent = logTruncated > 0
+    ? `共 ${logOffset + 1} 行 · 页面显示最近 ${logOffset + 1 - logTruncated} 行`
+    : `${logOffset} 行`;
+}
+
+async function copyLog() {
+  // 从后端拉全量（页面 DOM 是截断显示）
+  try {
+    const r = await fetch('/api/log?offset=0');
+    const d = await r.json();
+    const text = (d.lines || []).join('\n');
+    await navigator.clipboard.writeText(text);
+    toast(`已复制完整日志（${(d.lines || []).length} 行）`);
+  } catch (e) { toast('复制失败，可用「打包下载」获取 run.log'); }
 }
 
 function stopPolling() {
@@ -532,6 +549,7 @@ function pollLog() {
         if (d.total < logOffset) { logOffset = 0; document.getElementById('log').textContent = ''; }
         (d.lines || []).forEach(line => appendLog(line));
         logOffset = d.total;
+        updateLogBadge();
         await refreshStatus();
         if (!d.running) {
           stopPolling();
@@ -546,6 +564,7 @@ function pollLog() {
 function resetRunView() {
   document.getElementById('log').textContent = '';
   logOffset = 0;
+  logTruncated = 0;
   stopPolling();
   lastReportRun = null;
   document.getElementById('report-wrap').innerHTML =

@@ -36,6 +36,8 @@ body{margin:0;background:var(--bg);color:var(--ink);
   -webkit-font-smoothing:antialiased}
 a{color:var(--brand2)}
 code,pre{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace}
+/* 长命令自动换行：避免单行命令把报告撑出横向滚动条 */
+pre.code{white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere}
 .hero{background:var(--card);color:var(--ink);
   padding:36px 40px 32px;position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
 .hero .wrap{max-width:1180px;margin:0 auto;position:relative;z-index:1}

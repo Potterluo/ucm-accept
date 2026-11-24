@@ -261,6 +261,7 @@ async function initState() {
   document.getElementById('tok_custom').value = tok.custom || '';
   tokToggle();
   renderItems();
+  await refreshStatus();   // 结论卡与报告同源初始化（不再显示静态“尚未执行”）
   refreshReport();
   setRunning(STATE.running);
 }
@@ -573,6 +574,8 @@ async function refreshStatus() {
       (rep.reasons || []).map(x => `<li>${x}</li>`).join('') || '<li>暂无</li>';
     document.getElementById('verdict-meta').textContent =
       `任务 ${rep.run_id || ''} · 开始 ${rep.started_at || ''}`;
+    // 结论对应的报告变化时同步刷新 iframe（结论与报告永远同源）
+    if (rep.run_id !== lastReportRun) refreshReport();
   }
   setRunning(STATE.running);
 }
@@ -582,7 +585,8 @@ function refreshReport(manual) {
   const rep = (STATE && STATE.report) || {};
   const wrap = document.getElementById('report-wrap');
   const hasFrame = !!document.getElementById('report-frame');
-  fetch('/api/report').then(r => { if (!r.ok) throw 0; return r.text(); }).then(html => {
+  const url = rep.run_id ? `/api/report?run_id=${encodeURIComponent(rep.run_id)}` : '/api/report';
+  fetch(url).then(r => { if (!r.ok) throw 0; return r.text(); }).then(html => {
     if (!hasFrame) {
       wrap.innerHTML = '<iframe class="report-frame" id="report-frame" title="验收报告"></iframe>';
     }

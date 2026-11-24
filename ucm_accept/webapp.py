@@ -394,24 +394,39 @@ def create_app(service: AcceptanceService) -> FastAPI:
     def state_api() -> dict[str, Any]:
         return _state_payload()
 
+    def _report_paths(run_id: str = "") -> tuple[Path | None, Path | None]:
+        """报告 JSON/HTML 路径：优先会话当前报告（与 /api/state 同源），
+        其次 ?run_id= 指定的历史 run，最后回退磁盘最新。"""
+        report = service.current_report()
+        if report is not None and not run_id:
+            run_dir = Path(report.output_dir) if report.output_dir else None
+            if run_dir and (run_dir / "report.json").exists():
+                return run_dir / "report.json", run_dir / "report.html"
+        if run_id:
+            run_dir = service.outputs_root / "runs" / run_id
+            if (run_dir / "report.json").exists():
+                return run_dir / "report.json", run_dir / "report.html"
+        latest = find_latest_report(service.outputs_root)
+        if latest:
+            return latest, latest.with_name("report.html")
+        return None, None
+
     @app.get("/api/report", response_class=HTMLResponse)
-    def report_html() -> HTMLResponse:
-        path = find_latest_report(service.outputs_root)
-        html_path = path.with_name("report.html") if path else None
+    def report_html(run_id: str = "") -> HTMLResponse:
+        _json_path, html_path = _report_paths(run_id)
         if not html_path or not html_path.exists():
             raise HTTPException(status_code=404, detail="尚未生成报告")
         return HTMLResponse(html_path.read_text(encoding="utf-8"))
 
     @app.get("/api/report/download")
-    def report_download() -> Response:
-        path = find_latest_report(service.outputs_root)
-        html_path = path.with_name("report.html") if path else None
+    def report_download(run_id: str = "") -> Response:
+        _json_path, html_path = _report_paths(run_id)
         if not html_path or not html_path.exists():
             raise HTTPException(status_code=404, detail="尚未生成报告")
         return Response(
             content=html_path.read_bytes(),
             media_type="text/html",
-            headers={"Content-Disposition": f'attachment; filename="report-{path.parent.name}.html"'},
+            headers={"Content-Disposition": f'attachment; filename="report-{html_path.parent.name}.html"'},
         )
 
     @app.post("/api/config/save")
@@ -424,15 +439,13 @@ def create_app(service: AcceptanceService) -> FastAPI:
         return {"saved": str(saved)}
 
     @app.get("/api/report/bundle")
-    def report_bundle() -> Response:
+    def report_bundle(run_id: str = "") -> Response:
         """把当前 run 目录整体打包为 zip：UCM 报告（HTML/JSON）+ EvalScope
         运行时产物（performance_summary.txt / perf_report.html / benchmark_*.json /
         workload_* / command.txt / 各项原始输出）+ run.log。"""
-        path = find_latest_report(service.outputs_root)
-        if not path:
-            raise HTTPException(status_code=404, detail="尚未生成报告")
-        run_dir = path.parent
-        if not run_dir.is_dir():
+        _json_path, html_path = _report_paths(run_id)
+        run_dir = html_path.parent if html_path else None
+        if not run_dir or not run_dir.is_dir():
             raise HTTPException(status_code=404, detail="报告目录不存在")
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -447,9 +460,8 @@ def create_app(service: AcceptanceService) -> FastAPI:
         )
 
     @app.get("/api/report/export/pdf")
-    def report_pdf() -> dict[str, Any]:
-        path = find_latest_report(service.outputs_root)
-        html_path = path.with_name("report.html") if path else None
+    def report_pdf(run_id: str = "") -> Response:
+        _json_path, html_path = _report_paths(run_id)
         if not html_path or not html_path.exists():
             raise HTTPException(status_code=404, detail="尚未生成报告")
         try:
@@ -469,7 +481,7 @@ def create_app(service: AcceptanceService) -> FastAPI:
         return Response(
             content=pdf_path.read_bytes(),
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="report-{path.parent.name}.pdf"'},
+            headers={"Content-Disposition": f'attachment; filename="report-{html_path.parent.name}.pdf"'},
         )
 
     @app.get("/api/config/export")

@@ -471,6 +471,29 @@ class AcceptanceReport:
         return target
 
     @classmethod
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AcceptanceReport:
+        """从 report.json 反序列化后的字典构建报告对象（上传对比用）。"""
+        items = {
+            key: ItemResult.from_dict(value)
+            for key, value in (data.get("items") or {}).items()
+        }
+        return cls(
+            run_id=data.get("run_id", ""),
+            mode=data.get("mode", "live"),
+            endpoint=data.get("endpoint", {}),
+            started_at=data.get("started_at", ""),
+            finished_at=data.get("finished_at", ""),
+            items=items,
+            selected=[str(key) for key in (data.get("selected") or [])],
+            conclusion=data.get("conclusion", "未完成"),
+            reasons=list(data.get("reasons") or []),
+            config_snapshot=data.get("config_snapshot") or {},
+            output_dir=data.get("output_dir", ""),
+            title=data.get("title", "UCM 推理加速产品验收报告"),
+        )
+
+    @classmethod
     def load_json(cls, path: str | Path) -> AcceptanceReport:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         items = {

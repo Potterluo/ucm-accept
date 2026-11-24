@@ -26,7 +26,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Body, FastAPI, HTTPException, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -416,6 +416,63 @@ def create_app(service: AcceptanceService) -> FastAPI:
             return latest, latest.with_name("report.html")
         return None, None
 
+    @app.get("/api/runs")
+    def runs_list() -> list[dict[str, Any]]:
+        """列出输出目录中所有已完成验收 run 的摘要（供结果对比选择）。"""
+        out = []
+        runs_root = service.outputs_root / "runs"
+        if runs_root.is_dir():
+            for run_dir in sorted(runs_root.iterdir(), reverse=True):
+                rj = run_dir / "report.json"
+                if not rj.exists():
+                    continue
+                try:
+                    report = AcceptanceReport.load_json(rj)
+                except Exception:  # noqa: BLE001 - 损坏报告跳过
+                    continue
+                items = {
+                    key: item.status.value
+                    for key, item in report.items.items()
+                }
+                out.append({
+                    "run_id": report.run_id,
+                    "conclusion": report.conclusion,
+                    "mode": report.mode,
+                    "started_at": report.started_at,
+                    "items": items,
+                })
+        return out
+
+    @app.post("/api/compare", response_class=HTMLResponse)
+    def compare_page(payload: dict[str, Any] = Body(default={})) -> HTMLResponse:  # noqa: B008
+        """多结果对比报告（1~5 个结果，标签着色；支持盘上 run_id 与上传 JSON）。"""
+        entries_raw = (payload or {}).get("entries") or []
+        entries = []
+        for entry in entries_raw[:5]:
+            label = str(entry.get("label") or "").strip() or str(entry.get("run_id") or "结果")
+            report: AcceptanceReport | None = None
+            if entry.get("report_json"):
+                try:
+                    report = AcceptanceReport.from_dict(entry["report_json"])
+                except Exception as exc:  # noqa: BLE001
+                    raise HTTPException(status_code=400,
+                                        detail=f"{label}：上传的 report.json 无效（{exc}）") from exc
+            elif entry.get("run_id"):
+                rj = service.outputs_root / "runs" / str(entry["run_id"]) / "report.json"
+                if not rj.exists():
+                    raise HTTPException(status_code=404, detail=f"{label}：找不到 {entry['run_id']} 的报告")
+                try:
+                    report = AcceptanceReport.load_json(rj)
+                except Exception as exc:  # noqa: BLE001
+                    raise HTTPException(status_code=400,
+                                        detail=f"{label}：报告读取失败（{exc}）") from exc
+            if report is not None:
+                entries.append({"label": label, "report": report})
+        if not 1 <= len(entries) <= 5:
+            raise HTTPException(status_code=400, detail="请选择 1~5 个结果进行对比")
+        from .compare import build_compare_html
+        return HTMLResponse(build_compare_html(entries))
+
     @app.get("/api/report", response_class=HTMLResponse)
     def report_html(run_id: str = "") -> HTMLResponse:
         _json_path, html_path = _report_paths(run_id)
@@ -442,6 +499,17 @@ def create_app(service: AcceptanceService) -> FastAPI:
         except (OSError, ConfigError) as exc:
             raise HTTPException(status_code=400, detail=f"保存失败：{exc}") from exc
         return {"saved": str(saved)}
+
+    @app.get("/api/report/json")
+    def report_json_download(run_id: str = "") -> Response:
+        json_path, _html_path = _report_paths(run_id)
+        if not json_path or not json_path.exists():
+            raise HTTPException(status_code=404, detail="尚未生成报告")
+        return Response(
+            content=json_path.read_bytes(),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="report-{json_path.parent.name}.json"'},
+        )
 
     @app.get("/api/report/bundle")
     def report_bundle(run_id: str = "") -> Response:

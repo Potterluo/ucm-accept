@@ -134,7 +134,7 @@ sla:
 
 accuracy:
   runs: 2
-  limit: 100
+  # limit 不配置时跑全量；需要抽样时在数据集条目或此处单独设置 limit
   stability_threshold: 0.01
   request_timeout_s: 14400
   # 每项精度测试独立执行；默认四类数据集各跑两遍，用于验证 KVCache 落盘一致性。
@@ -144,28 +144,24 @@ accuracy:
       label: 基础问答
       dataset: gpqa_diamond
       subset: ""
-      limit: 50
       enabled: true
       description: GPQA Diamond，研究生级问答，衡量基础知识与推理
     gsm8k:
       label: 数学推理
       dataset: gsm8k
       subset: ""
-      limit: 100
       enabled: true
       description: GSM8K，小学数学应用题，衡量多步推理
     longbench_v2:
       label: 长文本
       dataset: longbench_v2
       subset: short
-      limit: 40
       enabled: true
       description: LongBench-v2 short 子集，衡量长上下文理解
     bfcl_v3:
       label: 工具调用
       dataset: bfcl_v3
       subset: ""
-      limit: 40
       enabled: true
       description: BFCL-v3，函数调用与工具选择能力
   extra_args: []

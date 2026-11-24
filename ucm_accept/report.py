@@ -501,7 +501,7 @@ def _perf_section(report: AcceptanceReport, item: ItemResult | None) -> str:
     return f"""
 <section class="section" id="perf">
   <h2><span class="num">02</span>基础性能 <span class="small muted" style="font-weight:400">EvalScope perf</span></h2>
-  <p class="lead">{_fmt_int(item.detail.get('context_length') if item and item.detail else 65536)} 上下文、固定请求数下的吞吐与首字/逐字延迟；表格中 TTFT/TPOT 单位为毫秒。</p>
+  <p class="lead">多组口径实测吞吐与首字/逐字延迟（每组并发、请求数、输入/输出长度、命中率、前缀种数均可配置，逐组独立执行 EvalScope perf 后聚合）；表格中 TTFT/TPOT 单位为毫秒。</p>
   {body}
 </section>
 """
@@ -538,19 +538,17 @@ def _multiturn_section(report: AcceptanceReport, item: ItemResult | None) -> str
 
 def _sla_section(report: AcceptanceReport, item: ItemResult | None) -> str:
     body = _empty_item(item)
-    strategy_hint = "EvalScope 原生 · P90"
-    mode_note = "默认调用 EvalScope 原生 <code>--sla-auto-tune</code>，按 p90_ttft / p90_tpot 搜索满足阈值（TTFT.P90 &lt; 10s、TPOT.P90 &lt; 50ms）的最高并发；不自行实现搜索算法。"
+    strategy_hint = "EvalScope 原生 · avg / P99"
+    mode_note = (
+        "默认调用 EvalScope 原生 <code>--sla-auto-tune</code>，按配置的 avg / P99 阈值"
+        "（如 avg_ttft ≤ 30s、avg_tpot ≤ 50ms，可在页面调整）搜索满足 SLA 的最高并发；"
+        "达标判定完全由 EvalScope 原生完成，不自行实现搜索与判定算法。"
+    )
     if item and item.detail:
         detail = item.detail
-        if detail.get("strategy") == "verify":
-            strategy_hint = "目标并发单点复核 · P90"
-            mode_note = (
-                "当前为 verify 模式：只调用 EvalScope perf 在目标并发下实测 P90，"
-                "不做并发搜索；适合快速复核。"
-            )
         target = detail.get("target") or {}
         probes = detail.get("probes") or []
-        strategy = detail.get("strategy", "verify")
+        strategy = detail.get("strategy", "native")
         target_point = next((p for p in probes if p.get("concurrency") == target.get("concurrency")), None)
         if target_point is None and strategy == "auto_tune" and detail.get("recommended_concurrency") == target.get("concurrency"):
             target_point = detail.get("best")
@@ -560,71 +558,80 @@ def _sla_section(report: AcceptanceReport, item: ItemResult | None) -> str:
             status, cls, color = "有条件", "info", "#b45309"
         else:
             status, cls, color = "不达标", "bad", "#b91c1c"
-        def verdict(value: float | None, limit: float | None, lower_is_better: bool = True) -> str:
+        # SLA 阈值 → (实测字段, 换算到显示单位, 单位名)；与 models.PerfPoint 一致
+        _metrics = [
+            ("avg_ttft_s", "TTFT avg", "ttft_avg_ms", 1000.0, "s"),
+            ("avg_tpot_ms", "TPOT avg", "tpot_avg_ms", 1.0, "ms"),
+            ("p99_ttft_s", "TTFT P99", "ttft_p99_ms", 1000.0, "s"),
+            ("p99_tpot_ms", "TPOT P99", "tpot_p99_ms", 1.0, "ms"),
+        ]
+        thresholds = target.get("thresholds") or {}
+        active = [(key, label, field, scale, unit) for key, label, field, scale, unit in _metrics
+                  if thresholds.get(key)]
+
+        def verdict(value: float | None, limit: float | None) -> str:
             if value is None or limit is None:
                 return '<span class="pill pending">—</span>'
-            ok = value < limit if lower_is_better else value >= limit
-            return '<span class="pill passed">通过</span>' if ok else '<span class="pill failed">未通过</span>'
-        actual_ttft = target_point.get("ttft_p90_ms") if target_point else None
-        actual_tpot = target_point.get("tpot_p90_ms") if target_point else None
-        compare_rows = f"""
-        <tr><td>TTFT.P90</td><td class="num">&lt; {_fmt((target.get('ttft_p90_ms') or 0)/1000, 2)} s</td>
-        <td class="num">{_fmt(actual_ttft / 1000, 2) if actual_ttft is not None else '—'} s</td>
-        <td>{verdict(actual_ttft, target.get('ttft_p90_ms'))}</td></tr>
-        <tr><td>TPOT.P90</td><td class="num">&lt; {_fmt(target.get('tpot_p90_ms'), 1)} ms</td>
-        <td class="num">{_fmt(actual_tpot, 1) if actual_tpot is not None else '—'} ms</td>
-        <td>{verdict(actual_tpot, target.get('tpot_p90_ms'))}</td></tr>
-        """
+            return ('<span class="pill passed">通过</span>'
+                    if value <= limit else '<span class="pill failed">未通过</span>')
+
+        compare_rows = "".join(
+            "<tr>"
+            f"<td>{label}</td>"
+            f"<td class='num'>≤ {_fmt(thresholds.get(key), 2)} {unit}</td>"
+            f"<td class='num'>{_fmt((target_point.get(field) if target_point else None) / scale, 2) if target_point and target_point.get(field) is not None else '—'} {unit}</td>"
+            f"<td>{verdict((target_point.get(field) / scale) if target_point and target_point.get(field) is not None else None, thresholds.get(key))}</td>"
+            "</tr>"
+            for key, label, field, scale, unit in active
+        )
         gap_html = ""
         if detail.get("gaps"):
             gap_html = f'<div class="callout bad"><strong>差距：</strong>{esc("；".join(detail["gaps"]))}</div>'
         probe_rows = []
         for point in probes:
-            passed = (
-                (point.get("ttft_p90_ms") or 0) < (target.get("ttft_p90_ms") or 0)
-                and (point.get("tpot_p90_ms") or 0) < (target.get("tpot_p90_ms") or 0)
+            ok = all(
+                (point.get(field) or 0) / scale <= thresholds.get(key)
+                for key, _label, field, scale, _unit in active
+                if thresholds.get(key)
             )
             verdict_html = (
-                '<span class="pill passed">满足</span>'
-                if passed
-                else '<span class="pill failed">不满足</span>'
+                '<span class="pill passed">满足</span>' if ok else '<span class="pill failed">不满足</span>'
             )
             probe_rows.append(
                 "<tr>"
                 f"<td class='num'>{_fmt_int(point.get('concurrency'))}</td>"
-                f"<td class='num'>{_fmt(point.get('ttft_p90_ms'), 1)}</td>"
-                f"<td class='num'>{_fmt(point.get('tpot_p90_ms'), 1)}</td>"
+                f"<td class='num'>{_fmt(point.get('ttft_avg_ms'), 1)} / {_fmt(point.get('ttft_p99_ms'), 1)}</td>"
+                f"<td class='num'>{_fmt(point.get('tpot_avg_ms'), 1)} / {_fmt(point.get('tpot_p99_ms'), 1)}</td>"
                 f"<td class='num'>{_fmt(point.get('throughput_tok_s'), 0)}</td>"
                 f"<td>{verdict_html}</td>"
                 "</tr>"
             )
         charts = ""
-        if probes:
-            charts = (
-                '<div class="charts-2">'
-                f'<div class="chart"><h3>TTFT.P90（秒）</h3>'
-                f'{svg_line_chart(probes, lambda p: (p.get("ttft_p90_ms") or 0)/1000, title="SLA TTFT.P90", unit="秒", threshold=(target.get("ttft_p90_ms") or 0)/1000, threshold_label="目标", color="#0071e3")}</div>'
-                f'<div class="chart"><h3>TPOT.P90（毫秒）</h3>'
-                f'{svg_line_chart(probes, lambda p: p.get("tpot_p90_ms"), title="SLA TPOT.P90", unit="毫秒", threshold=target.get("tpot_p90_ms"), threshold_label="目标", color="#ff9500")}</div>'
-                "</div>"
-            )
+        if probes and active:
+            cells = ""
+            for (key, label, field, scale, unit), color in zip(
+                active, ["#0071e3", "#ff9500", "#af52de", "#30b0c7"]
+            ):
+                cells += (
+                    f'<div class="chart"><h3>{label}（{unit}）</h3>'
+                    f'{svg_line_chart(probes, lambda p, f=field, s=scale: (p.get(f) or 0)/s, title=label, unit=unit, threshold=(thresholds.get(key) or 0), threshold_label="目标", color=color)}</div>'
+                )
+            charts = '<div class="charts-2">' + cells + "</div>"
         recommended = detail.get("recommended_concurrency")
         body = f"""
         <div class="grid">
           <div class="metric"><div class="k">结论</div><div class="v" style="font-size:21px;color:{color}">{esc(status)}</div><div class="s">{'目标并发下满足' if detail.get('target_met') else '目标并发下未满足'}</div></div>
-          <div class="metric"><div class="k">目标并发</div><div class="v">{_fmt_int(target.get('concurrency'))}</div><div class="s">{esc(target.get('context_length'))} 上下文</div></div>
-          <div class="metric"><div class="k">实测 TTFT.P90</div><div class="v">{_fmt(actual_ttft / 1000, 2) if actual_ttft is not None else '—'}</div><div class="s">秒</div></div>
-          <div class="metric"><div class="k">实测 TPOT.P90</div><div class="v">{_fmt(actual_tpot, 1) if actual_tpot is not None else '—'}</div><div class="s">毫秒</div></div>
-          <div class="metric"><div class="k">建议并发</div><div class="v">{_fmt_int(recommended)}</div><div class="s">{'EvalScope 原生建议（P90）' if strategy == 'auto_tune' else '目标并发达标值'}</div></div>
+          <div class="metric"><div class="k">目标并发</div><div class="v">{_fmt_int(target.get('concurrency'))}</div><div class="s">{esc(target.get('input_length'))} 输入 · {esc(target.get('output_tokens'))} 输出</div></div>
+          <div class="metric"><div class="k">建议并发</div><div class="v">{_fmt_int(recommended)}</div><div class="s">EvalScope 原生搜索结果</div></div>
         </div>
         <div class="table-wrap">
-        <table><thead><tr><th>指标</th><th class="num">目标</th><th class="num">实测（{_fmt_int(target.get('concurrency'))} 并发）</th><th>判定</th></tr></thead>
-        <tbody>{compare_rows}</tbody></table></div>
+        <table><thead><tr><th>指标</th><th class="num">目标（≤）</th><th class="num">实测（{_fmt_int(target.get('concurrency'))} 并发）</th><th>判定</th></tr></thead>
+        <tbody>{compare_rows or '<tr><td colspan="4" class="muted">未配置阈值</td></tr>'}</tbody></table></div>
         <div class="callout {cls}">{esc(detail.get('note') or '')}</div>
         {gap_html}
         {_command_block(item)}
         <div class="table-wrap">
-        <table><thead><tr><th class="num">并发</th><th class="num">TTFT.P90 (ms)</th><th class="num">TPOT.P90 (ms)</th><th class="num">吞吐 (tok/s)</th><th>判定</th></tr></thead>
+        <table><thead><tr><th class="num">并发</th><th class="num">TTFT avg/P99 (ms)</th><th class="num">TPOT avg/P99 (ms)</th><th class="num">吞吐 (tok/s)</th><th>判定</th></tr></thead>
         <tbody>{''.join(probe_rows) or '<tr><td colspan="5" class="muted">无有效探测点</td></tr>'}</tbody></table></div>
         {charts}
         """
@@ -758,7 +765,7 @@ def _criteria_section(report: AcceptanceReport) -> str:
     <div class="kv"><div class="k">性能默认</div><div class="v">{perf_text}</div></div>
     <div class="kv"><div class="k">SLA 目标</div><div class="v">TTFT.P90 &lt; {_fmt((target.get('ttft_p90_ms') or 10000)/1000, 1)}s；TPOT.P90 &lt; {_fmt(target.get('tpot_p90_ms') or 50, 0)}ms</div></div>
     <div class="kv"><div class="k">SLA 并发</div><div class="v">{_fmt_int(target.get('concurrency'))} 并发 · {_fmt_int(target.get('context_length'))} 上下文</div></div>
-    <div class="kv"><div class="k">SLA 模式</div><div class="v">{'EvalScope 原生 auto_tune' if sla.get('mode') == 'auto_tune' else '目标并发单点 verify'}</div></div>
+    <div class="kv"><div class="k">SLA 模式</div><div class="v">'EvalScope 原生 auto_tune（avg / P99 口径）'</div></div>
     <div class="kv"><div class="k">精度</div><div class="v">每项 {esc(accuracy.get('runs', 2))} 遍 · 稳定性阈值 {_fmt((accuracy.get('stability_threshold') or 0.01)*100, 1)}pp</div></div>
     <div class="kv"><div class="k">Agent</div><div class="v">{_fmt_int((agent.get('context_required') or 262144)/1024)}K · 服务级成功率阈值 {percent(agent.get('success_threshold'))} · {esc(agent.get('duration_s', 900))}s</div></div>
     <div class="kv"><div class="k">报告模式</div><div class="v">{'实机' if report.mode == 'live' else '模拟（不作验收依据）'}</div></div>

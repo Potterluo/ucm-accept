@@ -105,7 +105,7 @@ def _apply_payload(service: AcceptanceService, payload: dict[str, Any]) -> list[
                 "prefix_count": max(1, int(group.get("prefix_count", 32))),
             }
         )
-    if not groups:
+    if "perf" in items and not groups:
         raise UCMAcceptError("基础性能测试至少需要一组压测数据")
     config.set("perf.groups", groups)
     config.set("perf.dataset", str(perf.get("dataset", "random")).strip() or "random")

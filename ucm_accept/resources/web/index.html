@@ -72,6 +72,15 @@ button.danger{background:none;color:var(--red);font-size:12.5px;padding:6px 10px
 .item.running{background:rgba(0,113,227,.045)}
 .item.running .item-icon{animation:breathe 1.6s ease-in-out infinite}
 @keyframes breathe{0%,100%{opacity:1}50%{opacity:.55}}
+/* ---------- 文件上传按钮（Apple 风格） ---------- */
+.file-btn{display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+  background:var(--card);color:var(--blue);border:1px solid var(--line-2);border-radius:999px;
+  padding:8px 18px;font-size:13px;font-weight:600;transition:all .5s var(--ease);overflow:hidden}
+.file-btn:hover{background:var(--bg)}
+.file-btn input[type="file"]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.file-btn-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-btn.has-file{background:var(--blue-soft);border-color:var(--blue)}
+
 /* ---------- pills ---------- */
 .pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2.5px 11px;font-size:11.5px;font-weight:600;white-space:nowrap}
 .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
@@ -404,6 +413,17 @@ function toggleCompare() {
   if (show && !document.querySelector('#compare-rows .cmp-row')) addCompareRow();
 }
 
+function bindFileButton(row) {
+  const input = row.querySelector('.cmp-file');
+  const text = row.querySelector('.file-btn-text');
+  const btn = row.querySelector('.file-btn');
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    text.textContent = file ? file.name : '上传 report.json';
+    btn.classList.toggle('has-file', !!file);
+  });
+}
+
 function addCompareRow() {
   const rows = document.querySelectorAll('#compare-rows .cmp-row').length;
   if (rows >= 5) { toast('最多支持 5 个结果'); return; }
@@ -419,11 +439,13 @@ function addCompareRow() {
         <select class="cmp-source" style="flex:1">
           <option value="">— 选择已有结果 —</option>${options}
         </select>
-        <input type="file" class="cmp-file" accept=".json" style="flex:1"
-          onchange="this.dataset.json = this.files[0] ? '' : ''"
-          title="或上传 report.json">
+        <label class="file-btn" style="flex:1">
+          <input type="file" class="cmp-file" accept=".json,.yml">
+          <span class="file-btn-text">上传 report.json</span>
+        </label>
         <button class="danger" onclick="this.closest('.cmp-row').remove()">删除</button>
       </div>`);
+    bindFileButton(wrap.lastElementChild);
   });
 }
 

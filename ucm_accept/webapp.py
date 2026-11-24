@@ -382,10 +382,11 @@ def create_app(service: AcceptanceService) -> FastAPI:
         )
 
     @app.get("/api/log")
-    def run_log() -> Response:
-        """当前（或最近一次）执行的日志文本；供前端轮询兜底（公网代理可能缓冲 SSE）。"""
-        text = "\n".join(state.get("log_lines", [])[-500:])
-        return Response(text, media_type="text/plain; charset=utf-8")
+    def run_log(offset: int = 0) -> dict[str, Any]:
+        """增量日志：offset 为前端已接收行数，返回之后的行；供前端 1s 轮询（公网代理可能缓冲 SSE）。"""
+        lines = state.get("log_lines", [])
+        new_lines = lines[offset:] if 0 <= offset < len(lines) else []
+        return {"total": len(lines), "lines": new_lines, "running": service.running}
 
     @app.get("/api/state")
     def state_api() -> dict[str, Any]:

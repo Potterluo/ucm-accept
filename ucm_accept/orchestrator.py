@@ -291,41 +291,62 @@ class Orchestrator:
                 "groups": len(groups),
             },
         )
-        total = len(groups)
-        for index, group in enumerate(groups):
-            self._check_cancel()
+        total_points = 0
+        for group in groups:
             try:
                 parallel = [int(v) for v in (group.get("parallel") or [8])]
             except (TypeError, ValueError):
                 raise UCMAcceptError(
-                    f"第 {index + 1} 组并发配置非法：{group.get('parallel')!r}"
+                    f"并发配置非法：{group.get('parallel')!r}"
+                ) from None
+            total_points += len(parallel)
+        done_points = 0
+        for index, group in enumerate(groups):
+            try:
+                parallel = [int(v) for v in (group.get("parallel") or [8])]
+            except (TypeError, ValueError):
+                raise UCMAcceptError(
+                    f"并发配置非法：{group.get('parallel')!r}"
                 ) from None
             number = max(1, int(group.get("number", 64)))
             inp = int(group.get("input", 65536))
             out = int(group.get("output", 512))
             ratio = float(group.get("prefix_ratio", 0.9) or 0)
-            params = self._perf_params(parallel=parallel, number=number)
-            params.min_prompt_length = params.max_prompt_length = inp
-            params.min_tokens = params.max_tokens = out
-            params.prefix_length = round(inp * max(0.0, min(1.0, ratio))) if ratio > 0 else 0
-            params.prefix_count = int(group.get("prefix_count", 32))
-            self._emit(
-                f"第 {index + 1}/{total} 组：并发 {parallel}，请求 {number}，输入 {inp}，输出 {out}，"
-                f"命中率 {percent(ratio)}（前缀 {params.prefix_length} tokens）",
-                level="info",
-                fraction=(index + 0.05) / total,
-            )
-            sub = self.engine.run_perf(
-                self._endpoint(), params, ensure_dir(output_dir / f"group{index + 1}"), log, self.cancel_event
-            )
-            detail.points.extend(sub.points)
-            detail.config.setdefault("source", sub.config.get("source", "evalscope"))
-            detail.config[f"group{index + 1}"] = sub.config
+            prefix_length = round(inp * max(0.0, min(1.0, ratio))) if ratio > 0 else 0
+            prefix_count = int(group.get("prefix_count", 32))
+            # 每个并发点独立执行 + 独立子目录：evalscope 多梯度共用 outputs 目录时
+            # 会触发 benchmark_data.db FileExistsError
+            for conc in parallel:
+                self._check_cancel()
+                params = self._perf_params(parallel=[conc], number=number)
+                params.min_prompt_length = params.max_prompt_length = inp
+                params.min_tokens = params.max_tokens = out
+                params.prefix_length = prefix_length
+                params.prefix_count = prefix_count
+                self._emit(
+                    f"第 {index + 1} 组：并发 {conc}，请求 {number}，输入 {inp}，输出 {out}，"
+                    f"命中率 {percent(ratio)}（前缀 {prefix_length} tokens）",
+                    level="info",
+                    fraction=(done_points + 0.05) / total_points,
+                )
+                sub = self.engine.run_perf(
+                    self._endpoint(), params,
+                    ensure_dir(output_dir / f"group{index + 1}" / f"c{conc}"),
+                    log, self.cancel_event,
+                )
+                done_points += 1
+                detail.points.extend(sub.points)
+                detail.config.setdefault("source", sub.config.get("source", "evalscope"))
+                detail.config[f"group{index + 1}_c{conc}"] = sub.config
         self._set_detail(item, detail.to_dict())
-        for group_index in range(total):
-            self._attach_command(item, output_dir / f"group{group_index + 1}",
-                                 key=f"command_group{group_index + 1}")
-        self._attach_command(item, output_dir / "group1")
+        for group_index in range(len(groups)):
+            for conc_dir in sorted((output_dir / f"group{group_index + 1}").glob("c*")):
+                self._attach_command(item, conc_dir,
+                                     key=f"command_group{group_index + 1}_{conc_dir.name}")
+        # 顶层 command 取第一个并发点（兼容报告字段）
+        first_point = next(iter(sorted((output_dir / "group1").glob("c*"))), None)
+        if first_point is not None:
+            self._attach_command(item, first_point)
         item.artifacts["原始输出目录"] = relative_artifact(output_dir, self.run_dir)
         summary_file = output_dir / "ucm_perf.json"
         if summary_file.exists():

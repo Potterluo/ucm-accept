@@ -610,7 +610,7 @@ def _sla_section(report: AcceptanceReport, item: ItemResult | None) -> str:
         if probes and active:
             cells = ""
             for (key, label, field, scale, unit), color in zip(
-                active, ["#0071e3", "#ff9500", "#af52de", "#30b0c7"]
+                active, ["#0071e3", "#ff9500", "#af52de", "#30b0c7"], strict=False
             ):
                 cells += (
                     f'<div class="chart"><h3>{label}（{unit}）</h3>'

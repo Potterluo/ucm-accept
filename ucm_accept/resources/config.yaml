@@ -163,7 +163,7 @@ accuracy:
       dataset: bfcl_v3
       subset: ""
       enabled: true
-      description: BFCL-v3，函数调用与工具选择能力
+      description: BFCL-v3，函数调用与工具选择能力；需被测服务启用工具调用（vLLM 示例：--enable-auto-tool-choice --tool-call-parser hermes）
   extra_args: []
 
 agent:

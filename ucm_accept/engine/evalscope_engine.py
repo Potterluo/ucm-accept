@@ -122,6 +122,9 @@ class EvalScopeEngine(Engine):
             for var, value in assets_hub.cache_env(hub).items():
                 env[var] = value
         env.setdefault("PYTHONUNBUFFERED", "1")
+        # 精度/压测均为 API 驱动，子进程不需要本机 GPU：禁用 CUDA 避免
+        # torch.cuda.is_available() 在部分 WSL/CUDA 组合下段错误（bfcl 依赖链带入 torch）
+        env.setdefault("CUDA_VISIBLE_DEVICES", "")
         env.setdefault("EVALSCOPE_LANGUAGE", "zh")
         env.setdefault("TERM", "dumb")
         return env
@@ -260,7 +263,7 @@ class EvalScopeEngine(Engine):
                         if len(collected) < 800_000:
                             collected.append(clean)
                         stripped = clean.rstrip()
-                        if log and stripped and not stripped.startswith(("╭", "╰", "┌", "└", "├", "┃")):
+                        if log and stripped:
                             log(stripped[:1200])
                     if cancel is not None and cancel.is_set():
                         self._terminate(process)

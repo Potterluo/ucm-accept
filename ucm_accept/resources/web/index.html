@@ -385,12 +385,26 @@ function toggleLog() {
   const collapsed = el.classList.toggle('collapsed');
   document.getElementById('log-toggle').textContent = collapsed ? '展开' : '折叠';
 }
-function exportPdf() {
-  toast('正在生成 PDF…');
-  fetch('/api/report/export/pdf').then(r => r.json()).then(d => {
-    if (d.pdf) toast('PDF 已生成：' + d.pdf);
-    else toast(d.detail || 'PDF 导出失败');
-  }).catch(() => toast('PDF 导出失败'));
+async function exportPdf() {
+  toast('正在生成 PDF（约数秒）…');
+  try {
+    const r = await fetch('/api/report/export/pdf');
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      toast(d.detail || 'PDF 导出失败');
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ucm-accept-report-${(STATE.report && STATE.report.run_id) || 'latest'}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('PDF 已生成并开始下载');
+  } catch (e) { toast('PDF 导出失败'); }
 }
 
 function collectPayload(items) {

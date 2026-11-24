@@ -456,16 +456,21 @@ def create_app(service: AcceptanceService) -> FastAPI:
             from playwright.sync_api import sync_playwright
 
             pdf_path = html_path.with_suffix(".pdf")
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(args=["--no-sandbox"])
-                page = browser.new_page()
-                page.goto(html_path.as_uri(), wait_until="load")
-                page.pdf(path=str(pdf_path), format="A4", print_background=True,
-                         margin={"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"})
-                browser.close()
+            if not pdf_path.exists():
+                with sync_playwright() as pw:
+                    browser = pw.chromium.launch(args=["--no-sandbox"])
+                    page = browser.new_page()
+                    page.goto(html_path.as_uri(), wait_until="load")
+                    page.pdf(path=str(pdf_path), format="A4", print_background=True,
+                             margin={"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"})
+                    browser.close()
         except Exception as exc:  # noqa: BLE001 - chromium 缺失等环境问题
             raise HTTPException(status_code=500, detail=f"PDF 导出失败：{exc}") from exc
-        return {"pdf": str(pdf_path)}
+        return Response(
+            content=pdf_path.read_bytes(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="report-{path.parent.name}.pdf"'},
+        )
 
     @app.get("/api/config/export")
     def config_export() -> Response:

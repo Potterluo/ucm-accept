@@ -355,8 +355,8 @@ function panelHtml(key, groups, mt, sla, acc, agent) {
   return `
     <div class="hint">EvalScope AgentX 服务级压测；上下文低于模型上限时自动降级 smoke 并在报告中标注。</div>
     <div class="row">
-      <div><label class="field">目标上下文（tokens）</label><input type="number" id="agent-context" value="${agent.context}"></div>
-      <div class="narrow"><label class="field">持续时长（分钟）</label><input type="number" id="agent-duration" value="${agent.duration}"></div>
+      <div><label class="field">目标上下文（tokens，决定 AgentX 变体：≥128K 用 256k，否则 full）</label><input type="number" id="agent-context" value="${agent.context}"></div>
+      <div class="narrow"><label class="field">持续时长（分钟，benchmark ≥15）</label><input type="number" id="agent-duration" value="${agent.duration}" min="15"></div>
       <div><label class="field">Agent 数据集</label><input type="text" id="agent-dataset" value="${agent.dataset_name}"></div>
     </div>`;
 }

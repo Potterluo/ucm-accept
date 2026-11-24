@@ -100,7 +100,7 @@ button.danger{background:none;color:var(--red);font-size:12.5px;padding:6px 10px
 .ds-desc{font-size:11.5px;color:var(--muted);margin-top:2px}
 .hint{font-size:12px;color:var(--muted);line-height:1.6;margin:4px 0 10px}
 /* ---------- log / verdict / report ---------- */
-.log{width:100%;height:240px;overflow-y:auto;background:#0d0d0d;border:1px solid var(--line);border-radius:12px;
+.log{width:100%;height:400px;overflow-y:auto;background:#0d0d0d;border:1px solid var(--line);border-radius:12px;
   padding:12px 14px;font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;font-size:12px;line-height:1.55;
   color:#c8f0c8;white-space:pre-wrap;word-break:break-all;transition:height .5s var(--ease)}
 .log.collapsed{height:34px;overflow:hidden}
@@ -440,53 +440,48 @@ async function probe() {
     : `<span class="probe-bad">○ ${d.message}</span><div class="hint">${d.detail || ''}</div>`;
 }
 
-let evtSource = null;
 let pollTimer = null;
+let logOffset = 0;  // 已接收的日志行数（增量拉取）
 
 function appendLog(line) {
   const log = document.getElementById('log');
   log.textContent += line + '\n';
+  // DOM 上限：超过 4000 行时截去前半，保留最近内容
+  const lines = log.textContent.split('\n');
+  if (lines.length > 4000) log.textContent = lines.slice(-2000).join('\n');
   log.scrollTop = log.scrollHeight;
 }
 
-function stopListening() {
-  if (evtSource) { evtSource.close(); evtSource = null; }
+function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
 
-function listenEvents() {
-  stopListening();
-  evtSource = new EventSource('/api/events');
-  evtSource.onmessage = e => {
-    const d = JSON.parse(e.data);
-    if (d.type === 'log') appendLog(d.line);
-    else if (d.type === 'status') refreshStatus();
-    else if (d.type === 'done') { refreshStatus(); refreshReport(); setRunning(false); stopListening();
-      if (d.conclusion) toast(`验收完成：${d.conclusion}`); }
-    else if (d.type === 'error') {
-      if (d.message) appendLog('✗ ' + d.message);
-      toast('执行失败，详见日志');
-      refreshStatus(); refreshReport(); setRunning(false); stopListening();
-    } else if (d.type === 'idle') { setRunning(false); stopListening(); }
-  };
-  // 公网代理可能缓冲 SSE：轮询兜底（日志整体替换 + 状态刷新）
+function pollLog() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   pollTimer = setInterval(async () => {
     try {
-      const r = await fetch('/api/log');
+      const r = await fetch('/api/log?offset=' + logOffset);
       if (r.ok) {
-        const text = await r.text();
-        const log = document.getElementById('log');
-        if (text && log.textContent.split('\n').length - 1 < text.split('\n').length) {
-          log.textContent = text; log.scrollTop = log.scrollHeight;
+        const d = await r.json();
+        // total < offset 说明开始了新一轮执行：清屏重计
+        if (d.total < logOffset) { logOffset = 0; document.getElementById('log').textContent = ''; }
+        (d.lines || []).forEach(line => appendLog(line));
+        logOffset = d.total;
+        await refreshStatus();
+        if (!d.running) {
+          stopPolling();
+          await refreshReport();
+          setRunning(false);
         }
       }
-      await refreshStatus();
     } catch (e) { /* 忽略轮询失败 */ }
-  }, 1500);
+  }, 1000);
 }
 
 function resetRunView() {
   document.getElementById('log').textContent = '';
+  logOffset = 0;
+  stopPolling();
   lastReportRun = null;
   document.getElementById('report-wrap').innerHTML =
     '<div class="empty-report" style="border:none;border-radius:0">正在执行，结束后这里会显示完整验收报告。</div>';
@@ -505,7 +500,7 @@ async function startRun(items) {
   if (!r.ok) { toast(d.detail || '启动失败'); return; }
   resetRunView();
   setRunning(true);
-  listenEvents();
+  pollLog();
 }
 function runSelected() { startRun(checkedItems()); }
 

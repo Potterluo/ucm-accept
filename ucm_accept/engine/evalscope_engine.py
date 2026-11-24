@@ -257,11 +257,11 @@ class EvalScopeEngine(Engine):
                         clean = redact_secret(strip_ansi(item), effective_secret)
                         log_file.write(clean)
                         log_file.flush()
-                        if len(collected) < 100_000:
+                        if len(collected) < 800_000:
                             collected.append(clean)
                         stripped = clean.rstrip()
                         if log and stripped and not stripped.startswith(("╭", "╰", "┌", "└", "├", "┃")):
-                            log(stripped[:600])
+                            log(stripped[:1200])
                     if cancel is not None and cancel.is_set():
                         self._terminate(process)
                         raise CancelledError("用户已取消，已终止 EvalScope 进程")

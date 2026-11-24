@@ -674,12 +674,20 @@ class EvalScopeEngine(Engine):
 
     # ------------------------------------------------------------------ agent
     def _agent_argv(self, endpoint: Endpoint, params: AgentParams, output_dir: Path) -> list[str]:
-        scenario = params.scenario_name
+        # AgentX 场景统一以 JSON 传入（evalscope 支持完整字段）：
+        # - variant 按目标上下文自动选择（≥128K 用 256k 变体，否则 full）
+        # - max_context_length 交给 AgentX 原生裁剪 trace
+        # - 上下文不足/短时长时进入 smoke 模式（trace_limit 用内置默认）
+        scenario_obj: dict[str, Any] = {
+            "name": params.scenario_name,
+            "variant": "256k" if params.target_context >= 131072 else "full",
+            "max_context_length": params.target_context,
+        }
         if params.degraded:
-            scenario = json.dumps(
-                {"name": params.scenario_name, "mode": params.degraded_mode},
-                ensure_ascii=False,
-            )
+            scenario_obj["mode"] = params.degraded_mode
+            if params.degraded_mode == "smoke":
+                scenario_obj["trace_limit"] = 4
+        scenario = json.dumps(scenario_obj, ensure_ascii=False)
         mapping = self._base_mapping(endpoint, output_dir)
         mapping.update(
             {

@@ -762,11 +762,18 @@ class Orchestrator:
                 f"可用上下文 {detected} < 目标 {target}，切换为 EvalScope AgentX smoke 模式",
                 level="warning",
             )
+        duration_s = int(self.config.get("agent.duration_s", 900))
+        if not degraded and duration_s < 900:
+            self._emit(
+                f"AgentX benchmark 模式要求持续时长 ≥ 900 秒，已将 {duration_s} 秒提升为 900 秒（15 分钟）",
+                level="warning",
+            )
+            duration_s = 900
         params = AgentParams(
             target_context=target,
             context_detected=detected,
             parallel=int(self.config.get("agent.parallel", 4)),
-            duration_s=int(self.config.get("agent.duration_s", 900)),
+            duration_s=duration_s,
             degraded=degraded,
             degraded_mode=str(self.config.get("agent.degraded.mode", "smoke")),
             degraded_parallel=int(self.config.get("agent.degraded.parallel", 1)),

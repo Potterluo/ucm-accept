@@ -165,6 +165,7 @@ def create_app(service: AcceptanceService) -> FastAPI:
     state: dict[str, Any] = {
         "thread": None,
         "events": None,  # 当前运行的 SSE 队列
+        "log_lines": [],  # 当前执行的日志（轮询通道用）
         "error": None,
     }
 
@@ -318,9 +319,12 @@ def create_app(service: AcceptanceService) -> FastAPI:
         events: queue.Queue = queue.Queue()
         state["events"] = events
         state["error"] = None
+        state["log_lines"] = []
 
         def on_progress(event: ProgressEvent) -> None:
-            events.put({"type": "log", "line": f"[{event.overall * 100:5.1f}%] {event.message}"})
+            line = f"[{event.overall * 100:5.1f}%] {event.message}"
+            state["log_lines"].append(line)
+            events.put({"type": "log", "line": line})
             events.put({"type": "status"})
 
         def runner() -> None:
@@ -329,6 +333,7 @@ def create_app(service: AcceptanceService) -> FastAPI:
                 events.put({"type": "done", "conclusion": report.conclusion, "run_id": report.run_id})
             except Exception as exc:  # noqa: BLE001 - 执行异常转为 SSE 事件
                 state["error"] = str(exc)
+                state["log_lines"].append(f"✗ 执行失败：{exc}")
                 events.put({"type": "error", "message": str(exc)})
 
         thread = threading.Thread(target=runner, name="ucm-run", daemon=True)
@@ -369,7 +374,18 @@ def create_app(service: AcceptanceService) -> FastAPI:
                     yield "data: " + json.dumps({"type": "status"}, ensure_ascii=False) + "\n\n"
                     return
 
-        return StreamingResponse(stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                     "Connection": "keep-alive"},
+        )
+
+    @app.get("/api/log")
+    def run_log() -> Response:
+        """当前（或最近一次）执行的日志文本；供前端轮询兜底（公网代理可能缓冲 SSE）。"""
+        text = "\n".join(state.get("log_lines", [])[-500:])
+        return Response(text, media_type="text/plain; charset=utf-8")
 
     @app.get("/api/state")
     def state_api() -> dict[str, Any]:
@@ -406,13 +422,24 @@ def create_app(service: AcceptanceService) -> FastAPI:
 
     @app.get("/api/report/export/pdf")
     def report_pdf() -> dict[str, Any]:
+        path = find_latest_report(service.outputs_root)
+        html_path = path.with_name("report.html") if path else None
+        if not html_path or not html_path.exists():
+            raise HTTPException(status_code=404, detail="尚未生成报告")
         try:
-            path = service.export_pdf()
-        except UCMAcceptError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 - PDF 后端缺失等环境问题
+            from playwright.sync_api import sync_playwright
+
+            pdf_path = html_path.with_suffix(".pdf")
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(args=["--no-sandbox"])
+                page = browser.new_page()
+                page.goto(html_path.as_uri(), wait_until="load")
+                page.pdf(path=str(pdf_path), format="A4", print_background=True,
+                         margin={"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"})
+                browser.close()
+        except Exception as exc:  # noqa: BLE001 - chromium 缺失等环境问题
             raise HTTPException(status_code=500, detail=f"PDF 导出失败：{exc}") from exc
-        return {"pdf": str(path)}
+        return {"pdf": str(pdf_path)}
 
     @app.get("/api/config/export")
     def config_export() -> Response:

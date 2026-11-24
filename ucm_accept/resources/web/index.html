@@ -154,7 +154,7 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;padding:28px 0 8px}
     <div class="row" style="margin-top:14px">
       <div style="flex:1.4"><label class="field">服务地址</label>
         <input type="text" id="base_url" placeholder="http://127.0.0.1:8000/v1"></div>
-      <div><label class="field">模型名称 <span style="color:#aeaeb2">（即服务拉起时的 --served-model-name）</span></label>
+      <div><label class="field">模型名称 <span style="color:#aeaeb2">（--served-model-name）</span></label>
         <input type="text" id="model" placeholder="qwen3-0.6b"></div>
       <div><label class="field">API Key（可选）</label>
         <input type="password" id="api_key" placeholder=""></div>
@@ -173,7 +173,7 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;padding:28px 0 8px}
     <div id="probe_result" style="margin-top:10px;font-size:12.5px;color:var(--muted)">尚未检测。点击“检测连通”验证地址、模型与上下文窗口。</div>
   </div>
 
-  <div class="section-title">验收项目 <small>开关决定是否纳入验收，「配置」展开单项参数，「运行」执行单项</small></div>
+  <div class="section-title">验收项目 <small>开关决定是否纳入验收，「配置」展开单项参数</small></div>
   <div class="card" id="items" style="padding:6px 24px"></div>
 
   <div class="actions">
@@ -230,15 +230,15 @@ const ICONS = {
 };
 const ITEMS = {
   perf: {eta: '', name: '基础性能测试', eta: '约 5 分钟', accent: '#0071e3',
-         desc: '多组口径下的吞吐、TTFT、TPOT 与总延迟，并绘制并发趋势。'},
+         desc: '多组配置实测吞吐、TTFT、TPOT 与总延迟，并绘制并发趋势。'},
   multiturn: {eta: '', name: '多轮对话测试', eta: '约 10 分钟', accent: '#af52de',
          desc: '由 EvalScope 多轮压测执行真实对话 / Agent 轨迹场景，统计完成率、延迟与缓存命中。'},
   sla: {eta: '', name: 'SLA 自动调优', eta: '约 8 分钟', accent: '#ff9500',
          desc: 'EvalScope --sla-auto-tune 按 avg / P99 阈值自动搜索满足 SLA 的最大并发。'},
   accuracy: {eta: '', name: '模型精度测试', eta: '约 20 分钟', accent: '#34c759',
-         desc: 'GPQA、GSM8K、LongBench-v2、BFCL-v3 各跑两轮（先全量一轮再全量第二轮），核验 KVCache 落盘一致性。'},
+         desc: 'GPQA、GSM8K、LongBench-v2、BFCL-v3 各跑两轮，核验 KVCache 落盘一致性；BFCL 需服务启用工具调用。'},
   agent: {eta: '', name: 'Agent 场景测试', eta: '', accent: '#30b0c7',
-         desc: 'EvalScope AgentX 长会话服务级压测。要求模型服务上下文不低于数据集所需；不足时自动降级为 smoke 模式跑通完整流程并在报告中标注（指标不作为验收结论）。'}
+         desc: 'EvalScope AgentX 长会话服务级压测；上下文不足时自动降级 smoke 并标注（不作验收结论）。'}
 };
 const ORDER = ['perf', 'multiturn', 'sla', 'accuracy', 'agent'];
 let STATE = null;
@@ -298,11 +298,11 @@ function renderItems() {
 
 function panelHtml(key, groups, mt, sla, acc, agent) {
   if (key === 'perf') return `
-    <div class="hint">每组口径独立执行一次 EvalScope perf 并聚合；前缀长度 = 输入长度 × 命中率（取整）。</div>
+    <div class="hint">每组独立执行一次 EvalScope perf 并聚合；前缀长度 = 输入长度 × 命中率（取整）。</div>
     <table class="groups-table"><thead><tr>
       <th>并发</th><th>请求数</th><th>输入长度</th><th>输出长度</th><th>命中率 %</th><th>前缀种数</th><th></th>
     </tr></thead><tbody id="perf-groups">${groups.map(g => perfGroupRow(g)).join('')}</tbody></table>
-    <button class="link" onclick="addGroup()">+ 添加一组口径</button>
+    <button class="link" onclick="addGroup()">+ 添加一组</button>
     <div class="row" style="margin-top:8px">
       <div><label class="field">perf 数据集</label><input type="text" id="perf-dataset" value="${STATE.perf.dataset}"></div>
       <div class="narrow"><label class="field">预热请求数</label><input type="number" id="perf-warmup" value="${STATE.perf.warmup}"></div>
@@ -340,7 +340,7 @@ function panelHtml(key, groups, mt, sla, acc, agent) {
       <div><label class="field">TPOT P99 ≤（毫秒，可选）</label><input type="number" id="sla-p99-tpot" value="${sla.thresholds.p99_tpot_ms ?? ''}"></div>
     </div>`;
   if (key === 'accuracy') return `
-    <div class="hint">两轮 = 先跑完一轮全部勾选数据集，再跑第二轮（同数据集两轮得分偏差用于核验 KVCache 落盘一致性）。</div>
+    <div class="hint">先跑完一轮全部勾选数据集，再跑第二轮；两轮得分偏差用于核验一致性。</div>
     <div class="ds-check">${acc.datasets.map(d => `
       <label class="ds-item"><input type="checkbox" class="acc-dataset" data-key="${d.key}"
         ${d.enabled ? 'checked' : ''}>

@@ -502,7 +502,7 @@ def _perf_section(report: AcceptanceReport, item: ItemResult | None) -> str:
     return f"""
 <section class="section" id="perf">
   <h2><span class="num">02</span>基础性能 <span class="small muted" style="font-weight:400">EvalScope perf</span></h2>
-  <p class="lead">多组口径实测吞吐与首字/逐字延迟（每组并发、请求数、输入/输出长度、命中率、前缀种数均可配置，逐组独立执行 EvalScope perf 后聚合）；表格中 TTFT/TPOT 单位为毫秒。</p>
+  <p class="lead">多组配置逐组执行 EvalScope perf 并聚合；表格中 TTFT/TPOT 单位为毫秒。</p>
   {body}
 </section>
 """
@@ -558,9 +558,7 @@ def _sla_section(report: AcceptanceReport, item: ItemResult | None) -> str:
     body = _empty_item(item)
     strategy_hint = "EvalScope 原生 · avg / P99"
     mode_note = (
-        "默认调用 EvalScope 原生 <code>--sla-auto-tune</code>，按配置的 avg / P99 阈值"
-        "（如 avg_ttft ≤ 30s、avg_tpot ≤ 50ms，可在页面调整）搜索满足 SLA 的最高并发；"
-        "达标判定完全由 EvalScope 原生完成，不自行实现搜索与判定算法。"
+        "调用 EvalScope 原生 <code>--sla-auto-tune</code>，按 avg / P99 阈值搜索满足 SLA 的最高并发。"
     )
     if item and item.detail:
         detail = item.detail

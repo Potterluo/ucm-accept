@@ -84,19 +84,19 @@ button.danger{background:none;color:var(--red);font-size:12.5px;padding:6px 10px
 .pill.pending,.pill.skipped,.pill.canceled{color:var(--muted-2);background:var(--bg)}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
 /* ---------- config panels ---------- */
-.config-panel{display:none;margin:10px 0 2px 50px;padding:14px 16px;background:#fafafa;border-radius:14px}
+.config-panel{display:none;margin:8px 0 2px;padding:14px 16px;background:#fafafa;border-radius:14px}
 .item.open .config-panel{display:block}
 .config-panel .row{margin-bottom:10px}
 .groups-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
 .groups-table th{background:var(--bg);color:var(--muted-2);font-weight:600;padding:7px 10px;text-align:left}
 .groups-table td{padding:6px 8px;border-top:1px solid var(--line)}
 .groups-table input{border-radius:9px;padding:6px 9px;font-size:12.5px}
-.ds-check{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 12px}
-.ds-check .ds-item{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line-2);border-radius:12px;padding:8px 12px;min-width:250px;flex:1;cursor:pointer;transition:border-color .5s var(--ease)}
+.ds-check{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;margin:6px 0 12px}
+.ds-check .ds-item{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line-2);border-radius:12px;padding:8px 12px;cursor:pointer;transition:border-color .5s var(--ease)}
 .ds-check .ds-item:hover{border-color:var(--blue)}
 .ds-check input{margin-top:2px;accent-color:var(--blue);flex:none}
 .ds-name{font-size:12.5px;font-weight:600}
-.ds-id{font-size:11px;color:var(--muted);font-family:"SF Mono",ui-monospace,Consolas,monospace}
+.ds-id{font-size:11px;color:var(--muted);font-family:"SF Mono",ui-monospace,Consolas,monospace;margin-left:6px}
 .ds-desc{font-size:11.5px;color:var(--muted);margin-top:2px}
 .hint{font-size:12px;color:var(--muted);line-height:1.6;margin:4px 0 10px}
 /* ---------- log / verdict / report ---------- */
@@ -135,7 +135,6 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;padding:28px 0 8px}
     <div class="eyebrow">UCM Inference Acceleration · Acceptance</div>
     <h1 id="app-title">UCM 推理加速验收工具</h1>
     <p id="app-subtitle"></p>
-    <div class="chips" id="app-chips"></div>
   </div>
 
   <!-- 端点 -->
@@ -258,9 +257,6 @@ async function initState() {
   document.getElementById('app-title').textContent = STATE.title;
   document.getElementById('app-subtitle').textContent = STATE.subtitle;
   document.getElementById('ver').textContent = STATE.version;
-  document.getElementById('app-chips').innerHTML =
-    `<span class="chip ${STATE.mode === 'mock' ? 'mock' : ''}">执行引擎 · ${STATE.mode === 'mock' ? '模拟演示（不会产生真实请求）' : 'EvalScope 实机'}</span>
-     <span class="chip">EvalScope 原生执行</span><span class="chip">离线可用 · 报告自包含</span>`;
   document.getElementById('base_url').value = STATE.endpoint.base_url || '';
   document.getElementById('model').value = STATE.endpoint.model || '';
   const tok = STATE.tokenizer;
@@ -294,9 +290,9 @@ function renderItems() {
         <div><div class="item-title">${ITEMS[key].name}<span class="item-eta">${ITEMS[key].eta}</span></div>
         <div class="item-desc">${ITEMS[key].desc}</div></div>
       </div></div>
+      <button class="link" onclick="toggleConfig('${key}')">配置</button>
       <label class="switch"><input type="checkbox" class="item-enable" data-key="${key}" ${sel.has(key) ? 'checked' : ''}><span class="track"></span></label>
     </div>
-    <button class="link" onclick="toggleConfig('${key}')">配置</button>
     <div class="config-panel" id="panel-${key}">${panelHtml(key, perfGroups, mt, sla, acc, agent)}</div>
   </div>`).join('');
 }

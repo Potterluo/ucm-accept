@@ -474,6 +474,8 @@ class EvalScopeEngine(Engine):
         ]
         if not builtin:
             argv.extend(["--dataset-path", str(params.dataset_path)])
+        if params.tokenizer_path:
+            argv.extend(["--tokenizer-path", params.tokenizer_path])
         argv.extend([
             "--multi-turn",
             "--min-turns",

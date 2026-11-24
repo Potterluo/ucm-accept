@@ -463,6 +463,7 @@ class Orchestrator:
             scenario_label=str(preset.get("label", key)),
             dataset_name=str(preset.get("dataset", "") or ""),
             dataset_path=dataset_path,
+            tokenizer_path=str(self.config.get("perf.tokenizer_path", "") or ""),
             parallel=int(self.config.get("multiturn.parallel", 4)),
             conversations=int(self.config.get("multiturn.conversations", 12)),
             min_turns=int(self.config.get("multiturn.min_turns", 2)),

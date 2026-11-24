@@ -103,6 +103,7 @@ class MultiturnParams:
     max_turns: int
     min_tokens: int
     max_tokens: int
+    tokenizer_path: str = ""
     request_timeout_s: int = 180
     extra_args: list[str] = field(default_factory=list)
 

@@ -129,6 +129,9 @@ class AcceptanceService:
             raise UCMAcceptError("已有验收任务正在执行，请等待完成")
         self._running = True
         try:
+            # 每次执行都使用全新的 run（新 run_id/目录/报告），避免多次执行互相覆盖
+            self._orchestrator = None
+            self._engine = None
             orchestrator = self._ensure_orchestrator(progress)
             return orchestrator.run_item(key, scenario=scenario)
         finally:
@@ -145,6 +148,9 @@ class AcceptanceService:
             raise UCMAcceptError("已有验收任务正在执行，请等待完成")
         self._running = True
         try:
+            # 每次执行都使用全新的 run（新 run_id/目录/报告），避免多次执行互相覆盖
+            self._orchestrator = None
+            self._engine = None
             orchestrator = self._ensure_orchestrator(progress)
             return orchestrator.run_all(keys)
         finally:

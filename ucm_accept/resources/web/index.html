@@ -73,8 +73,6 @@ button.danger{background:none;color:var(--red);font-size:12.5px;padding:6px 10px
 .item.running{background:rgba(0,113,227,.045)}
 .item.running .item-icon{animation:breathe 1.6s ease-in-out infinite}
 @keyframes breathe{0%,100%{opacity:1}50%{opacity:.55}}
-.status-col{display:flex;flex-direction:column;align-items:flex-end;gap:3px;max-width:280px}
-.status-summary{font-size:12px;color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* ---------- pills ---------- */
 .pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2.5px 11px;font-size:11.5px;font-weight:600;white-space:nowrap}
 .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
@@ -281,7 +279,6 @@ function renderItems() {
         <div><div class="item-title">${ITEMS[key].name}<span class="item-eta">${ITEMS[key].eta}</span></div>
         <div class="item-desc">${ITEMS[key].desc}</div></div>
       </div></div>
-      <div class="status-col" id="status-${key}"><span class="pill pending">待执行</span></div>
       <label class="switch"><input type="checkbox" class="item-enable" data-key="${key}" ${sel.has(key) ? 'checked' : ''}><span class="track"></span></label>
     </div>
     <button class="link" onclick="toggleConfig('${key}')">配置</button>
@@ -444,26 +441,60 @@ async function probe() {
 }
 
 let evtSource = null;
-function listenEvents() {
-  if (evtSource) evtSource.close();
-  evtSource = new EventSource('/api/events');
+let pollTimer = null;
+
+function appendLog(line) {
   const log = document.getElementById('log');
+  log.textContent += line + '\n';
+  log.scrollTop = log.scrollHeight;
+}
+
+function stopListening() {
+  if (evtSource) { evtSource.close(); evtSource = null; }
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+function listenEvents() {
+  stopListening();
+  evtSource = new EventSource('/api/events');
   evtSource.onmessage = e => {
     const d = JSON.parse(e.data);
-    if (d.type === 'log') {
-      log.textContent += d.line + '\n';
-      log.scrollTop = log.scrollHeight;
-    } else if (d.type === 'status') {
-      refreshStatus();
-    } else if (d.type === 'done') {
-      refreshStatus(); refreshReport(); setRunning(false);
-      if (d.conclusion) toast(`验收完成：${d.conclusion}`);
-    } else if (d.type === 'error') {
-      setRunning(false); toast('执行失败：' + (d.message || '')); refreshStatus();
-    } else if (d.type === 'idle') {
-      setRunning(false);
-    }
+    if (d.type === 'log') appendLog(d.line);
+    else if (d.type === 'status') refreshStatus();
+    else if (d.type === 'done') { refreshStatus(); refreshReport(); setRunning(false); stopListening();
+      if (d.conclusion) toast(`验收完成：${d.conclusion}`); }
+    else if (d.type === 'error') {
+      if (d.message) appendLog('✗ ' + d.message);
+      toast('执行失败，详见日志');
+      refreshStatus(); refreshReport(); setRunning(false); stopListening();
+    } else if (d.type === 'idle') { setRunning(false); stopListening(); }
   };
+  // 公网代理可能缓冲 SSE：轮询兜底（日志整体替换 + 状态刷新）
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/api/log');
+      if (r.ok) {
+        const text = await r.text();
+        const log = document.getElementById('log');
+        if (text && log.textContent.split('\n').length - 1 < text.split('\n').length) {
+          log.textContent = text; log.scrollTop = log.scrollHeight;
+        }
+      }
+      await refreshStatus();
+    } catch (e) { /* 忽略轮询失败 */ }
+  }, 1500);
+}
+
+function resetRunView() {
+  document.getElementById('log').textContent = '';
+  lastReportRun = null;
+  document.getElementById('report-wrap').innerHTML =
+    '<div class="empty-report" style="border:none;border-radius:0">正在执行，结束后这里会显示完整验收报告。</div>';
+  document.getElementById('verdict-value').textContent = '执行中…';
+  document.getElementById('verdict-value').style.color = '#0062c4';
+  document.getElementById('verdict-reasons').innerHTML = '';
+  document.getElementById('verdict-meta').textContent = '';
+  document.getElementById('report-path').textContent = '';
 }
 
 async function startRun(items) {
@@ -472,7 +503,7 @@ async function startRun(items) {
     body: JSON.stringify({payload})});
   const d = await r.json();
   if (!r.ok) { toast(d.detail || '启动失败'); return; }
-  document.getElementById('log').textContent = '';
+  resetRunView();
   setRunning(true);
   listenEvents();
 }
@@ -486,28 +517,27 @@ async function cancelRun() {
 function setRunning(running) {
   document.getElementById('btn-run').disabled = running;
   document.getElementById('btn-cancel').style.display = running ? '' : 'none';
-  ORDER.forEach(k => {
+  if (running) ORDER.forEach(k => {
     const el = document.getElementById('item-' + k);
-    if (!el) return;
-    const pill = document.getElementById(`status-${k}`)?.querySelector('.pill');
-    el.classList.toggle('running', running && pill && pill.classList.contains('running'));
+    if (el) el.classList.add('running');
+  });
+  else ORDER.forEach(k => {
+    const el = document.getElementById('item-' + k);
+    if (el) el.classList.remove('running');
   });
 }
 
 async function refreshStatus() {
   const r = await fetch('/api/state'); STATE = await r.json();
   const rep = STATE.report || {};
-  for (const key of ORDER) {
-    const col = document.getElementById('status-' + key);
-    if (!col) continue;
-    const it = rep.items && rep.items[key];
-    const status = it ? it.status : 'pending';
-    const label = {passed: '通过', failed: '未通过', warning: '需关注', running: '执行中',
-                   pending: '待执行', skipped: '已跳过', canceled: '已取消'}[status] || status;
-    col.innerHTML = `<span class="pill ${status}">${label}</span>` +
-      (it && it.summary ? `<div class="status-summary" title="${it.summary}">${it.summary}</div>` : '');
-    const itemEl = document.getElementById('item-' + key);
-    itemEl.classList.toggle('running', status === 'running');
+  if (STATE.running) {
+    // 执行中：结论区保持“执行中…”，避免上一次报告的结论提前覆盖
+    document.getElementById('verdict-label').textContent = '验收结论';
+    document.getElementById('verdict-value').textContent = '执行中…';
+    document.getElementById('verdict-value').style.color = '#0062c4';
+    document.getElementById('verdict-reasons').innerHTML = '<li>正在执行，完成后自动更新结论与报告。</li>';
+    document.getElementById('verdict-meta').textContent = '';
+    return;
   }
   if (rep.conclusion) {
     document.getElementById('verdict-label').textContent =

@@ -17,14 +17,15 @@ def test_service_probe_and_run(config: Config):
     assert service.report_path() is not None
 
 
-def test_service_accumulates_items_in_one_report(config: Config):
+def test_service_each_run_is_fresh(config: Config):
+    """每次执行都是全新 run：独立 run_id、独立报告，互不覆盖（避免同目录二跑冲突）。"""
     service = AcceptanceService(config, mode="mock", mock_delay_ms=0)
     service.run_item("perf")
-    report = service.current_report()
-    run_id = report.run_id
+    first = service.current_report()
     service.run_item("multiturn")
-    assert service.current_report().run_id == run_id
-    assert len(service.current_report().items) == 2
+    second = service.current_report()
+    assert first.run_id != second.run_id
+    assert set(second.items.keys()) == {"multiturn"}
 
 
 def test_endpoint_change_starts_new_report(config: Config):

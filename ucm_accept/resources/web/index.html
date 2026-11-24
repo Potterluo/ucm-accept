@@ -101,9 +101,10 @@ button.danger{background:none;color:var(--red);font-size:12.5px;padding:6px 10px
 .hint{font-size:12px;color:var(--muted);line-height:1.6;margin:4px 0 10px}
 /* ---------- log / verdict / report ---------- */
 .log-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.log{width:100%;height:420px;overflow:auto;background:#0d0d0d;border:1px solid var(--line);border-radius:12px;
+.log{width:100%;height:70vh;overflow:auto;border:1px solid var(--line);border-radius:12px;
   padding:12px 14px;font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;font-size:11.5px;line-height:1.5;
-  color:#d6e4d6;white-space:pre;transition:height .5s var(--ease)}
+  white-space:pre;transition:height .5s var(--ease),background .5s var(--ease),color .5s var(--ease);
+  background:var(--log-bg,#0d1117);color:var(--log-fg,#e6edf3)}
 .log.collapsed{height:36px;overflow:hidden}
 .gear{position:absolute;top:18px;right:22px;width:34px;height:34px;border-radius:50%;background:var(--bg);
   color:var(--muted-2);font-size:16px;border:1px solid var(--line)}
@@ -184,24 +185,32 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;padding:28px 0 8px}
     <button class="ghost" onclick="exportPdf()">导出 PDF</button>
   </div>
 
-  <div class="card verdict" style="margin-top:18px">
+  <div class="card" style="margin-top:18px">
+    <div class="log-toolbar">
+      <label class="field" style="margin:0">执行日志</label>
+      <button class="link" id="log-toggle" onclick="toggleLog()">折叠</button>
+      <button class="link" onclick="copyLog()">复制</button>
+      <span style="flex:1"></span>
+      <label class="field" style="margin:0">配色</label>
+      <select id="log-theme" onchange="applyLogTheme(this.value)" style="width:auto;padding:5px 10px;font-size:12px">
+        <option value="github-dark">GitHub Dark</option>
+        <option value="one-dark">One Dark</option>
+        <option value="dracula">Dracula</option>
+        <option value="solarized">Solarized Dark</option>
+        <option value="paper">Paper（浅色）</option>
+      </select>
+      <button class="link" onclick="window.open('/api/report/bundle')">打包下载（报告 + EvalScope 产物）</button>
+      <span class="pill pending" id="log-count" style="display:none">0 行</span>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <div class="card verdict" style="margin-top:16px">
     <div class="label" id="verdict-label">验收结论</div>
     <div class="value" id="verdict-value" style="color:#6e6e73">尚未执行</div>
     <ul id="verdict-reasons"></ul>
     <div id="verdict-meta" style="font-size:11.5px;color:var(--muted);margin-top:6px"></div>
     <div id="report-path" style="font-size:11.5px;color:var(--muted);margin-top:6px;font-family:'SF Mono',ui-monospace,Consolas,monospace"></div>
-  </div>
-
-  <div class="card" style="margin-top:16px">
-    <div class="log-toolbar">
-      <label class="field" style="margin:0">执行日志</label>
-      <button class="link" id="log-toggle" onclick="toggleLog()">折叠</button>
-      <button class="link" onclick="copyLog()">复制</button>
-      <button class="link" onclick="window.open('/api/report/bundle')">打包下载（报告 + EvalScope 产物）</button>
-      <span style="flex:1"></span>
-      <span class="pill pending" id="log-count" style="display:none">0 行</span>
-    </div>
-    <div class="log" id="log"></div>
   </div>
 
   <div class="section-title">验收报告 <small>报告内嵌图表与原始命令，可离线归档</small></div>
@@ -386,6 +395,33 @@ function toggleLog() {
   const collapsed = el.classList.toggle('collapsed');
   document.getElementById('log-toggle').textContent = collapsed ? '展开' : '折叠';
 }
+
+const LOG_THEMES = {
+  'github-dark': {bg: '#0d1117', fg: '#e6edf3', border: '#30363d'},
+  'one-dark':    {bg: '#282c34', fg: '#abb2bf', border: '#3e4451'},
+  'dracula':     {bg: '#282a36', fg: '#f8f8f2', border: '#44475a'},
+  'solarized':   {bg: '#002b36', fg: '#93a1a1', border: '#0a4b5c'},
+  'paper':       {bg: '#ffffff', fg: '#1d1d1f', border: '#e8e8ed'},
+};
+
+function applyLogTheme(name) {
+  const theme = LOG_THEMES[name] || LOG_THEMES['github-dark'];
+  const sel = document.getElementById('log-theme');
+  if (sel && sel.value !== name) sel.value = name;
+  const log = document.getElementById('log');
+  log.style.background = theme.bg;
+  log.style.color = theme.fg;
+  log.style.borderColor = theme.border;
+  localStorage.setItem('ucm-log-theme', name);
+}
+
+(function initLogTheme() {
+  const saved = localStorage.getItem('ucm-log-theme') || 'github-dark';
+  const sel = document.getElementById('log-theme');
+  if (sel) { sel.value = saved; sel.addEventListener('change', () => applyLogTheme(sel.value)); }
+  document.addEventListener('DOMContentLoaded', () => applyLogTheme(
+    localStorage.getItem('ucm-log-theme') || 'github-dark'));
+})();
 async function exportPdf() {
   toast('正在生成 PDF（约数秒）…');
   try {

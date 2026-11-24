@@ -765,7 +765,6 @@ def _agent_section(report: AcceptanceReport, item: ItemResult | None) -> str:
 def _criteria_section(report: AcceptanceReport) -> str:
     config = report.config_snapshot or {}
     sla = config.get("sla", {}) or {}
-    target = sla.get("target", {}) or {}
     accuracy = config.get("accuracy", {}) or {}
     agent = config.get("agent", {}) or {}
     perf = config.get("perf", {}) or {}

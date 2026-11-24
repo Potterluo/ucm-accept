@@ -17,9 +17,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import queue
 import threading
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -420,6 +422,29 @@ def create_app(service: AcceptanceService) -> FastAPI:
         except (OSError, ConfigError) as exc:
             raise HTTPException(status_code=400, detail=f"保存失败：{exc}") from exc
         return {"saved": str(saved)}
+
+    @app.get("/api/report/bundle")
+    def report_bundle() -> Response:
+        """把当前 run 目录整体打包为 zip：UCM 报告（HTML/JSON）+ EvalScope
+        运行时产物（performance_summary.txt / perf_report.html / benchmark_*.json /
+        workload_* / command.txt / 各项原始输出）+ run.log。"""
+        path = find_latest_report(service.outputs_root)
+        if not path:
+            raise HTTPException(status_code=404, detail="尚未生成报告")
+        run_dir = path.parent
+        if not run_dir.is_dir():
+            raise HTTPException(status_code=404, detail="报告目录不存在")
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file_path in sorted(run_dir.rglob("*")):
+                if file_path.is_file() and not file_path.is_symlink():
+                    zf.write(file_path, file_path.relative_to(run_dir.parent))
+        filename = f"ucm-accept-run-{run_dir.name}.zip"
+        return Response(
+            content=buffer.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @app.get("/api/report/export/pdf")
     def report_pdf() -> dict[str, Any]:

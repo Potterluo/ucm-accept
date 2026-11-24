@@ -39,7 +39,7 @@ from .report import render_report
 from .utils import ensure_dir, new_run_id, relative_artifact, set_latest_pointer, write_json_atomic
 
 # 兼容“精度数据集配置里没有显式 limit”的情况
-_FALLBACK_LIMIT = 100
+_FALLBACK_LIMIT = 0  # 0 = 全量（不向 evalscope 传 --limit）
 
 
 class Orchestrator:

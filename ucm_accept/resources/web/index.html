@@ -67,7 +67,6 @@ button.danger{background:none;color:var(--red);font-size:12.5px;padding:6px 10px
   background:var(--accent,#0071e3);color:#fff}
 .item-icon svg{display:block}
 .item-title{font-size:15px;font-weight:600;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
-.item-eta{font-size:11px;color:var(--muted);background:var(--bg);border-radius:999px;padding:2px 9px;font-weight:500}
 .item-desc{font-size:12.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item.open .item-desc{white-space:normal}
 .item.running{background:rgba(0,113,227,.045)}
@@ -230,16 +229,16 @@ const ICONS = {
   agent: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="5" y="5" width="14" height="14" rx="2.5"/><rect x="10" y="10" width="4" height="4" rx="0.8"/><path d="M9 2.5V5M15 2.5V5M9 19v2.5M15 19v2.5M2.5 9H5M2.5 15H5M19 9h2.5M19 15h2.5"/></svg>'
 };
 const ITEMS = {
-  perf: {name: '基础性能测试', eta: '约 5 分钟', accent: '#0071e3',
+  perf: {eta: '', name: '基础性能测试', eta: '约 5 分钟', accent: '#0071e3',
          desc: '多组口径下的吞吐、TTFT、TPOT 与总延迟，并绘制并发趋势。'},
-  multiturn: {name: '多轮对话测试', eta: '约 10 分钟', accent: '#af52de',
+  multiturn: {eta: '', name: '多轮对话测试', eta: '约 10 分钟', accent: '#af52de',
          desc: '由 EvalScope 多轮压测执行真实对话 / Agent 轨迹场景，统计完成率、延迟与缓存命中。'},
-  sla: {name: 'SLA 自动调优', eta: '约 8 分钟', accent: '#ff9500',
+  sla: {eta: '', name: 'SLA 自动调优', eta: '约 8 分钟', accent: '#ff9500',
          desc: 'EvalScope --sla-auto-tune 按 avg / P99 阈值自动搜索满足 SLA 的最大并发。'},
-  accuracy: {name: '模型精度测试', eta: '约 20 分钟', accent: '#34c759',
+  accuracy: {eta: '', name: '模型精度测试', eta: '约 20 分钟', accent: '#34c759',
          desc: 'GPQA、GSM8K、LongBench-v2、BFCL-v3 各跑两轮（先全量一轮再全量第二轮），核验 KVCache 落盘一致性。'},
-  agent: {name: 'Agent 场景测试', eta: '约 15 分钟', accent: '#30b0c7',
-         desc: 'EvalScope AgentX 长会话服务级压测；上下文不足时降级 smoke 并标注。'}
+  agent: {eta: '', name: 'Agent 场景测试', eta: '', accent: '#30b0c7',
+         desc: 'EvalScope AgentX 长会话服务级压测。要求模型服务上下文不低于数据集所需；不足时自动降级为 smoke 模式跑通完整流程并在报告中标注（指标不作为验收结论）。'}
 };
 const ORDER = ['perf', 'multiturn', 'sla', 'accuracy', 'agent'];
 let STATE = null;
@@ -287,7 +286,7 @@ function renderItems() {
     <div class="item-row">
       <div class="grow"><div class="item-head">
         <div class="item-icon" style="--accent:${ITEMS[key].accent}">${ICONS[key]}</div>
-        <div><div class="item-title">${ITEMS[key].name}<span class="item-eta">${ITEMS[key].eta}</span></div>
+        <div><div class="item-title">${ITEMS[key].name}</div>
         <div class="item-desc">${ITEMS[key].desc}</div></div>
       </div></div>
       <button class="link" onclick="toggleConfig('${key}')">配置</button>
@@ -350,7 +349,8 @@ function panelHtml(key, groups, mt, sla, acc, agent) {
     </div>
     <div class="row">
       <div class="narrow"><label class="field">轮数</label><input type="number" id="acc-runs" value="${acc.runs}"></div>
-      <div class="narrow"><label class="field">每项样本数（0=按预设）</label><input type="number" id="acc-limit" value="0"></div>
+      <div class="narrow"><label class="field">每项样本数（0=全量）
+        <input type="number" id="acc-limit" value="0"></label></div>
     </div>`;
   return `
     <div class="hint">EvalScope AgentX 服务级压测；上下文低于模型上限时自动降级 smoke 并在报告中标注。</div>

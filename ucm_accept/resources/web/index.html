@@ -349,8 +349,8 @@ function panelHtml(key, groups, mt, sla, acc, agent) {
     </div>
     <div class="row">
       <div class="narrow"><label class="field">轮数</label><input type="number" id="acc-runs" value="${acc.runs}"></div>
-      <div class="narrow"><label class="field">每项样本数（0=全量）
-        <input type="number" id="acc-limit" value="0"></label></div>
+      <div class="narrow"><label class="field">每项样本数（留空 = 全量）
+        <input type="number" id="acc-limit" placeholder="全量"></label></div>
     </div>`;
   return `
     <div class="hint">EvalScope AgentX 服务级压测；上下文低于模型上限时自动降级 smoke 并在报告中标注。</div>

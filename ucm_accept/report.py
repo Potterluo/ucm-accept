@@ -450,9 +450,10 @@ def _perf_section(report: AcceptanceReport, item: ItemResult | None) -> str:
     body = _empty_item(item)
     if item and item.detail and item.detail.get("points"):
         points = item.detail["points"]
-        threshold = (report.config_snapshot.get("sla", {}).get("target", {}) or {})
-        ttft_target = threshold.get("ttft_p90_ms")
-        tpot_target = threshold.get("tpot_p90_ms")
+        _sla_cfg = (report.config_snapshot.get("sla", {}) or {})
+        _thr = (_sla_cfg.get("thresholds") or {})
+        ttft_target = _thr.get("avg_ttft_s")  # 秒
+        tpot_target = _thr.get("avg_tpot_ms")  # 毫秒
         rows = []
         for point in points:
             rows.append(
@@ -472,9 +473,9 @@ def _perf_section(report: AcceptanceReport, item: ItemResult | None) -> str:
             )
         charts = (
             '<div class="charts-2">'
-            f'<div class="chart"><h3>TTFT.P90（秒）</h3><p>首字延迟随并发变化，虚线为 SLA 目标</p>'
+            f'<div class="chart"><h3>TTFT.P90（秒）</h3><p>首字延迟 P90 随并发变化；虚线为 SLA 的 TTFT avg 目标（如配置）</p>'
             f'{svg_line_chart(points, lambda p: (p.get("ttft_p90_ms") or 0) / 1000, title="TTFT.P90", unit="秒", threshold=(ttft_target / 1000 if ttft_target else None), threshold_label=f"目标 {ttft_target/1000:.1f}s" if ttft_target else "", color="#0071e3")}</div>'
-            f'<div class="chart"><h3>TPOT.P90（毫秒）</h3><p>逐字延迟随并发变化，虚线为 SLA 目标</p>'
+            f'<div class="chart"><h3>TPOT.P90（毫秒）</h3><p>逐字延迟 P90 随并发变化；虚线为 SLA 的 TPOT avg 目标（如配置）</p>'
             f'{svg_line_chart(points, lambda p: p.get("tpot_p90_ms"), title="TPOT.P90", unit="毫秒", threshold=tpot_target, threshold_label=f"目标 {tpot_target:.0f}ms" if tpot_target else "", color="#ff9500")}</div>'
             "</div>"
             f'<div class="chart"><h3>输出吞吐（tok/s）</h3><p>不同并发下的稳态输出吞吐</p>'
@@ -534,6 +535,23 @@ def _multiturn_section(report: AcceptanceReport, item: ItemResult | None) -> str
   {body}
 </section>
 """
+
+
+def _sla_target_text(target: dict) -> str:
+    """SLA 目标摘要（avg / P99 任意档位组合）。"""
+    labels = {
+        "avg_ttft_s": ("TTFT avg", 1000.0, "s"),
+        "avg_tpot_ms": ("TPOT avg", 1.0, "ms"),
+        "p99_ttft_s": ("TTFT P99", 1000.0, "s"),
+        "p99_tpot_ms": ("TPOT P99", 1.0, "ms"),
+    }
+    thresholds = target.get("thresholds") or {}
+    parts = [
+        f"{label} ≤ {_fmt(thresholds.get(key), 2)}{unit}"
+        for key, (label, scale, unit) in labels.items()
+        if thresholds.get(key)
+    ]
+    return "；".join(parts) or "未配置"
 
 
 def _sla_section(report: AcceptanceReport, item: ItemResult | None) -> str:
@@ -763,8 +781,8 @@ def _criteria_section(report: AcceptanceReport) -> str:
   <p class="lead">本次执行采用的默认预设；所有参数均外置于 config.yaml，可在现场按合同口径调整。</p>
   <div class="grid">
     <div class="kv"><div class="k">性能默认</div><div class="v">{perf_text}</div></div>
-    <div class="kv"><div class="k">SLA 目标</div><div class="v">TTFT.P90 &lt; {_fmt((target.get('ttft_p90_ms') or 10000)/1000, 1)}s；TPOT.P90 &lt; {_fmt(target.get('tpot_p90_ms') or 50, 0)}ms</div></div>
-    <div class="kv"><div class="k">SLA 并发</div><div class="v">{_fmt_int(target.get('concurrency'))} 并发 · {_fmt_int(target.get('context_length'))} 上下文</div></div>
+    <div class="kv"><div class="k">SLA 目标</div><div class="v">{_sla_target_text({"thresholds": sla.get("thresholds")})}</div></div>
+    <div class="kv"><div class="k">SLA 口径</div><div class="v">{_fmt_int(sla.get("auto_tune", {}).get("upper") or sla.get("target", {}).get("concurrency") or 256)} 并发上限 · {_fmt_int(sla.get("input_length") or 65536)} 输入 · {_fmt_int(sla.get("output_tokens") or 512)} 输出</div></div>
     <div class="kv"><div class="k">SLA 模式</div><div class="v">'EvalScope 原生 auto_tune（avg / P99 口径）'</div></div>
     <div class="kv"><div class="k">精度</div><div class="v">每项 {esc(accuracy.get('runs', 2))} 遍 · 稳定性阈值 {_fmt((accuracy.get('stability_threshold') or 0.01)*100, 1)}pp</div></div>
     <div class="kv"><div class="k">Agent</div><div class="v">{_fmt_int((agent.get('context_required') or 262144)/1024)}K · 服务级成功率阈值 {percent(agent.get('success_threshold'))} · {esc(agent.get('duration_s', 900))}s</div></div>

@@ -2,7 +2,11 @@ name: ci
 
 on:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
+      - "feat/**"
+      - "v*.*.*"
     tags: ["v*"]
   pull_request:
   workflow_dispatch:

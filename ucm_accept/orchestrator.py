@@ -458,6 +458,23 @@ class Orchestrator:
 
     def _run_single_multiturn(self, item: ItemResult, key: str, preset: dict[str, Any], *, fraction: float | None = None) -> None:
         dataset_path = self.config.resolve_asset(preset.get("dataset_path", "")) if preset.get("dataset_path") else None
+        # swe_smith live 构建默认首轮 65K tokens：按被测模型可用上下文自适应缩放，
+        # 避免请求超出模型上限被 400 拒绝
+        extra_args = [str(arg) for arg in (self.config.get("multiturn.extra_args", []) or [])]
+        if str(preset.get("dataset", "")) == "swe_smith":
+            try:
+                detected = self.engine.detect_context(self._endpoint())
+            except Exception:  # noqa: BLE001 - 探测失败时保守取值
+                detected = None
+            usable = min(detected or 32768, 65000)
+            first_turn = max(512, int(usable * 0.75))
+            extra_args += [
+                "--multi-turn-args",
+                json.dumps({"first_turn_length": first_turn,
+                            "subsequent_turn_length": 500,
+                            "chars_per_token": 3.0}),
+            ]
+            self._emit(f"swe_smith live 构建：按可用上下文 {detected} 自适应首轮 {first_turn} tokens", level="info")
         params = MultiturnParams(
             scenario_key=key,
             scenario_label=str(preset.get("label", key)),
@@ -471,7 +488,7 @@ class Orchestrator:
             min_tokens=int(self.config.get("multiturn.min_tokens", 128)),
             max_tokens=int(self.config.get("multiturn.max_tokens", 512)),
             request_timeout_s=int(self.config.get("multiturn.request_timeout_s", 180)),
-            extra_args=[str(arg) for arg in (self.config.get("multiturn.extra_args", []) or [])],
+            extra_args=extra_args,
         )
         output_dir = ensure_dir(self.raw_root / "multiturn" / key)
         self._emit(

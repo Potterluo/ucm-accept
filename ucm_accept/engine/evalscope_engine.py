@@ -600,7 +600,11 @@ class EvalScopeEngine(Engine):
         dataset_args: dict[str, Any] = dict(params.dataset_args or {})
         if params.subset:
             existing = dataset_args.get("subset_list") or []
-            dataset_args["subset_list"] = [params.subset] if not isinstance(existing, list) else existing
+            if not isinstance(existing, list):
+                existing = [existing]
+            if params.subset not in existing:
+                existing.append(params.subset)
+            dataset_args["subset_list"] = existing
         if dataset_args:
             argv.extend(["--dataset-args", json.dumps({params.dataset: dataset_args}, ensure_ascii=False)])
         if params.request_timeout_s:

@@ -122,16 +122,25 @@ def trigger_multiturn_download(evalscope_bin: str, scenario: str, source: str,
     return True, (proc.stdout + proc.stderr)[-200:]
 
 
-def trigger_agentx_download(evalscope_bin: str, source: str, work_dir: Path) -> tuple[bool, str]:
+def trigger_agentx_download(evalscope_bin: str, source: str, work_dir: Path,
+                            tokenizer_path: str = "", api_url: str = "") -> tuple[bool, str]:
     if source == "huggingface":
         print("  跳过 agentx：traces 下载仅 modelscope 源", flush=True)
         return True, "skipped"
     cmd = [evalscope_bin, "perf",
            "--scenario", json.dumps({"name": "agentx", "variant": "full"}),
            "--model", "mock-model", "--parallel", "1", "--duration", "900",
-           "--work-dir", str(work_dir / "agentx"), "--no-timestamp"]
+           "--work-dir", str(work_dir / "agentx"), "--no-timestamp",
+           "--tokenizer-path", tokenizer_path]
+    if api_url:
+        cmd += ["--api-url", api_url]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
-    return proc.returncode == 0, (proc.stdout + proc.stderr)[-300:]
+    ok = proc.returncode == 0
+    tail = (proc.stdout + proc.stderr)[-300:]
+    print(f"   {'下载完成' if ok else '下载失败，tail:'}", flush=True)
+    if not ok:
+        print(tail, flush=True)
+    return ok, tail
 
 
 def assemble(assets_dir: Path) -> None:
@@ -166,6 +175,8 @@ def main() -> int:
                         help="精度数据集列表（逗号分隔，覆盖清单）")
     parser.add_argument("--no-multiturn", action="store_true", help="跳过多轮场景下载")
     parser.add_argument("--include-agentx", action="store_true", help="下载 AgentX traces（约 1.9GB）")
+    parser.add_argument("--agentx-api-url", default="",
+                        help="AgentX benchmark 的被测端点（留空 = 只下载 traces 后失败退出）")
     parser.add_argument("--evalscope-bin", default="evalscope")
     parser.add_argument("--skip-cache-copy", action="store_true", help="只下载不组装（调试用）")
     args = parser.parse_args()
@@ -211,9 +222,10 @@ def main() -> int:
     # ---- AgentX ----
     if include_agentx:
         print("== AgentX traces（约 1.9GB）...", flush=True)
-        ok, tail = trigger_agentx_download(args.evalscope_bin, args.source, work_dir)
+        tokenizer_path = str(next((assets_dir / "tokenizers").iterdir(), ""))
+        ok, tail = trigger_agentx_download(args.evalscope_bin, args.source, work_dir,
+                                           tokenizer_path, args.agentx_api_url)
         results.append(("agentx", ok))
-        print("   done", flush=True)
 
     # ---- 组装数据层 ----
     if not args.skip_cache_copy:

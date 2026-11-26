@@ -20,6 +20,7 @@ from __future__ import annotations
 import io
 import json
 import queue
+import tarfile
 import threading
 import zipfile
 from collections.abc import Iterator
@@ -53,6 +54,10 @@ class RunBody(BaseModel):
 
 
 class SaveBody(BaseModel):
+    path: str = ""
+
+
+class AssetImportBody(BaseModel):
     path: str = ""
 
 
@@ -322,6 +327,43 @@ def create_app(service: AcceptanceService) -> FastAPI:
             "detail": result.detail,
             "latency_ms": result.latency_ms,
             "context_window": result.context_window,
+        }
+
+    @app.get("/api/assets/status")
+    def assets_status() -> dict[str, Any]:
+        hub = assets_hub.find_assets_root(
+            str(service.config.get("app.assets_dir", "") or "") or None
+        )
+        if hub is None:
+            return {"configured": False, "path": "", "description": "未发现资产包",
+                    "manifest_total": 0, "problems": [], "tokenizers": []}
+        total, problems = assets_hub.verify_manifest(hub)
+        return {
+            "configured": True,
+            "path": str(hub),
+            "description": assets_hub.describe(hub),
+            "manifest_total": total,
+            "problems": problems,
+            "tokenizers": assets_hub.builtin_tokenizers(hub),
+        }
+
+    @app.post("/api/assets/import")
+    def assets_import(body: AssetImportBody) -> dict[str, Any]:
+        from .assetpack import import_asset_pack
+
+        try:
+            result = import_asset_pack(service.config, body.path)
+        except (FileNotFoundError, ValueError, tarfile.TarError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        hub = Path(result["hub"])
+        total, problems = assets_hub.verify_manifest(hub)
+        return {
+            "configured": not problems,
+            "path": str(hub),
+            "description": assets_hub.describe(hub),
+            "manifest_total": total,
+            "problems": problems,
+            "tokenizers": assets_hub.builtin_tokenizers(hub),
         }
 
     @app.post("/api/run")

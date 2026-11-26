@@ -79,14 +79,29 @@ def build_notes(tag: str, repo: str, image: str) -> str:
         f"{badge('SHA256', 'merged checksum', 'grey', f'{base}/ucm-assets-{version}.tar.gz.sha256')}")
     add("")
     add("包含 16 个 tokenizer、精度数据集、多轮场景与 AgentX traces（约 5GB）。"
-        "超 2GiB 由 CI 自动分卷（GitHub Release 单文件上限），合并校验后解压，"
-        "再把 `UCM_ASSETS_DIR` 指向解压目录即可离线运行全部验收项：")
+        "超 2GiB 由 CI 自动分卷（GitHub Release 单文件上限）。三种导入方式任选：")
+    add("")
+    add("**方式一（推荐，全平台零命令行）**：启动 GUI（Windows 桌面版运行 `ucm-accept-gui.exe`）→ 右上 ⚙ 齿轮 →"
+        "「离线资产包」→ 填入 `part-00` 文件路径 → 点「导入并校验」。"
+        "分卷合并、解压、SHA256 校验一步完成，当前会话即时生效。")
+    add("")
+    add("**方式二 Linux / macOS：**")
     add("")
     add("```bash")
     add(f"cat ucm-assets-{version}.tar.gz.part-* > ucm-assets-{version}.tar.gz")
     add(f"sha256sum -c ucm-assets-{version}.tar.gz.sha256")
     add(f"tar -xzf ucm-assets-{version}.tar.gz -C ~/ucm-assets")
     add("UCM_ASSETS_DIR=~/ucm-assets ucm-accept --doctor --mock   # 校验 SHA256 与就绪状态")
+    add("```")
+    add("")
+    add("**方式三 Windows PowerShell**（Windows 10+ 自带 tar）：")
+    add("")
+    add("```powershell")
+    add(f"cmd /c copy /b ucm-assets-{version}.tar.gz.part-00+ucm-assets-{version}.tar.gz.part-01 ucm-assets-{version}.tar.gz")
+    add(f"Get-FileHash ucm-assets-{version}.tar.gz -Algorithm SHA256   # 与 .sha256 文件对照")
+    add(f"tar -xzf ucm-assets-{version}.tar.gz -C C:\\ucm-assets")
+    add('$env:UCM_ASSETS_DIR = "C:\\ucm-assets"')
+    add("ucm-accept --doctor --mock")
     add("```")
     add("")
 

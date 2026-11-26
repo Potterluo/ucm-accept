@@ -158,6 +158,18 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;padding:28px 0 8px}
         <div style="flex:0"><button class="ghost" onclick="saveConfig()">保存到配置文件</button></div>
       </div>
       <div id="save-status" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+        <strong style="font-size:13.5px">离线资产包</strong>
+        <span class="muted" style="font-size:12px;color:var(--muted)">　tokenizer / 数据集 / AgentX traces；导入后当前会话即时生效</span>
+        <div id="assets-status" style="font-size:12.5px;color:var(--muted);margin:6px 0">加载中…</div>
+        <div class="row">
+          <div style="flex:2"><label class="field">资源包路径（tar.gz / part-00 分卷 / 已解压目录）</label>
+            <input type="text" id="assets-path" placeholder="~/Downloads/ucm-assets-1.2.0.tar.gz.part-00"></div>
+          <div style="flex:0;display:flex;align-items:flex-end;padding-bottom:6px">
+            <button class="ghost" onclick="importAssets()">导入并校验</button></div>
+        </div>
+        <div id="assets-result" style="font-size:12.5px;margin-top:6px"></div>
+      </div>
     </div>
     <div class="row" style="margin-top:14px">
       <div style="flex:1.4"><label class="field">服务地址</label>
@@ -514,9 +526,69 @@ async function generateCompare() {
   } catch (e) { errEl.textContent = '生成失败：' + e; }
 }
 
+async function refreshAssets() {
+  const el = document.getElementById('assets-status');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/assets/status');
+    const d = await r.json();
+    if (!d.configured) {
+      el.innerHTML = '当前：未发现资产包 <span style="color:var(--muted)">（离线能力受限，可在下方导入）</span>';
+      return;
+    }
+    const ok = !(d.problems || []).length;
+    const tok = (d.tokenizers || []);
+    el.innerHTML = '当前：<span class="mono" style="color:var(--ink)">' + escapeHtml(d.path) + '</span><br>' +
+      (ok ? '<span style="color:#1d7a3d">✓ manifest ' + d.manifest_total + ' 项全部完整</span>'
+          : '<span style="color:#c21b17">✗ manifest 校验问题 ' + (d.problems || []).length + ' 个</span>') +
+      ' · 内置 tokenizer ' + tok.length + ' 个' + (tok.length ? '（' + escapeHtml(tok.slice(0, 3).join('、')) + (tok.length > 3 ? '…' : '') + '）' : '');
+  } catch (e) {
+    el.textContent = '资产包状态读取失败：' + e;
+  }
+}
+
+async function importAssets() {
+  const errEl = document.getElementById('assets-result');
+  errEl.style.color = 'var(--muted)';
+  errEl.textContent = '导入中：合并分卷 → 解压 → SHA256 校验…（大包需要几分钟）';
+  try {
+    const r = await fetch('/api/assets/import', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: document.getElementById('assets-path').value})});
+    const d = await r.json();
+    if (!r.ok) {
+      errEl.style.color = '#c21b17';
+      errEl.textContent = '导入失败：' + (d.detail || r.statusText);
+      return;
+    }
+    if ((d.problems || []).length) {
+      errEl.style.color = '#c21b17';
+      errEl.textContent = '校验未通过：' + escapeHtml((d.problems || []).join('；'));
+      return;
+    }
+    errEl.style.color = '#1d7a3d';
+    errEl.textContent = '✓ 导入成功：manifest ' + d.manifest_total + ' 项全部完整，已生效（' + d.path + '）';
+    await refreshAssets();
+    const s = await (await fetch('/api/state')).json();  // 刷新内置 tokenizer 下拉
+    STATE.tokenizer = s.tokenizer;
+    document.getElementById('tok_builtin').innerHTML =
+      (s.tokenizer.builtin_choices || []).map(n => `<option ${n === s.tokenizer.builtin ? 'selected' : ''}>${n}</option>`).join('');
+    toast('资产包已导入并生效');
+  } catch (e) {
+    errEl.style.color = '#c21b17';
+    errEl.textContent = '导入失败：' + e;
+  }
+}
+
+function escapeHtml(text) {
+  return String(text ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+}
+
 function toggleGear() {
   const p = document.getElementById('gear-panel');
   p.style.display = p.style.display === 'none' ? '' : 'none';
+  if (p.style.display === '') refreshAssets();
 }
 function toggleLog() {
   const el = document.getElementById('log');

@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from . import __version__
+from .assetpack import import_asset_pack
 from .assets import builtin_tokenizers, describe, find_assets_root, verify_manifest
 from .compare import build_compare_html
 from .config import Config, ConfigError, load_config
@@ -620,60 +621,24 @@ def _tokenizer_menu(service: AcceptanceService) -> None:
 # ---------------------------------------------------------------- 资产包
 
 
-def _safe_extract(tar_path: Path, dest: Path) -> None:
-    dest = dest.resolve()
-    with tarfile.open(tar_path, "r:gz") as tar:
-        for member in tar.getmembers():
-            target = (dest / member.name).resolve()
-            if not str(target).startswith(str(dest)):
-                raise tarfile.TarError(f"压缩包内路径越界：{member.name}")
-        tar.extractall(dest)
-
-
 def _import_asset_pack(service: AcceptanceService) -> None:
-    raw = _prompt("资源包路径（tar.gz / 分卷 part-00 / 已解压目录）", "")
+    raw = _prompt("资源包路径（tar.gz / part-00 分卷 / 已解压目录）", "")
     if not raw:
         return
-    source = Path(raw).expanduser()
-    if not source.exists():
-        print(RED(f"路径不存在：{source}"))
+    print(DIM("导入中：合并分卷 → 解压 → SHA256 校验…（大包需要几分钟）"))
+    try:
+        result = import_asset_pack(service.config, raw)
+    except (FileNotFoundError, ValueError, tarfile.TarError, OSError) as exc:
+        print(RED(f"导入失败：{exc}"))
         return
-    if ".part-" in source.name and source.is_file():
-        merged = source.parent / source.name.rsplit(".part-", 1)[0]
-        if not merged.exists():
-            parts = sorted(source.parent.glob(merged.name + ".part-*"))
-            print(DIM(f"检测到分卷，自动合并 {len(parts)} 个分卷 → {merged.name} …"))
-            with open(merged, "wb") as out:
-                for part in parts:
-                    with open(part, "rb") as chunk:
-                        shutil.copyfileobj(chunk, out)
-        source = merged
-    if source.is_dir():
-        hub = source
-    elif source.is_file() and source.name.endswith((".tar.gz", ".tgz")):
-        dest = Path(_prompt("解压到", str(Path.home() / "ucm-assets"))).expanduser()
-        dest.mkdir(parents=True, exist_ok=True)
-        print(DIM(f"解压 {source.name} → {dest}（大包需要几分钟）…"))
-        try:
-            _safe_extract(source, dest)
-        except (tarfile.TarError, OSError) as exc:
-            print(RED(f"解压失败：{exc}"))
-            return
-        hub = dest
-    else:
-        print(RED("不支持的类型：请提供 tar.gz / part-00 分卷 / 已解压目录"))
-        return
-    if not (hub / "manifest.json").exists():
-        print(YELLOW(f"⚠ {hub} 下没有 manifest.json——可能是缓存目录而非资产包"))
-    total, problems = verify_manifest(hub)
+    total, problems = result["total"], result["problems"]
     if problems:
         print(RED(f"校验失败：manifest {total} 项中 {len(problems)} 个问题："))
         for problem in problems:
             print(f"  · {problem}")
         return
-    service.config.set("app.assets_dir", str(hub.resolve()))
-    print(GREEN(f"资产包已导入并校验通过（manifest {total} 项）：{hub.resolve()}"))
-    print(DIM(f"持久化方式：export UCM_ASSETS_DIR={hub.resolve()}"))
+    print(GREEN(f"资产包已导入并校验通过（manifest {total} 项）：{result['hub']}"))
+    print(DIM(f"持久化方式：export UCM_ASSETS_DIR={result['hub']}"))
 
 
 def _assets_menu(service: AcceptanceService) -> None:

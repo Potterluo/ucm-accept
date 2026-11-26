@@ -63,8 +63,9 @@ def download_tokenizer(repo: str, source: str, dest_root: Path) -> Path | None:
     if source in ("modelscope", "auto"):
         try:
             from modelscope import snapshot_download
-            local_dir = Path(snapshot_download(repo))
-            print(f"  modelscope 下载完成：{local_dir}", flush=True)
+            patterns = list(TOKENIZER_FILES)
+            local_dir = Path(snapshot_download(repo, allow_patterns=patterns))
+            print(f"  modelscope 下载完成（仅 tokenizer 文件）：{local_dir}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"  modelscope 下载失败（{exc}）", flush=True)
             if source == "modelscope":
@@ -72,7 +73,7 @@ def download_tokenizer(repo: str, source: str, dest_root: Path) -> Path | None:
     if local_dir is None:
         try:
             from huggingface_hub import snapshot_download as hf_snapshot
-            local_dir = Path(hf_snapshot(repo))
+            local_dir = Path(hf_snapshot(repo, allow_patterns=list(TOKENIZER_FILES)))
             print(f"  huggingface 下载完成：{local_dir}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"  huggingface 下载失败（{exc}）", flush=True)

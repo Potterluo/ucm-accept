@@ -6,9 +6,13 @@ import re
 import shutil
 import signal
 import sys
+import tarfile
+import time
 from pathlib import Path
 
 from . import __version__
+from .assets import builtin_tokenizers, describe, find_assets_root, verify_manifest
+from .compare import build_compare_html
 from .config import Config, ConfigError, load_config
 from .doctor import run_doctor
 from .errors import UCMAcceptError
@@ -96,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mock", action="store_true", help="使用模拟引擎（演示 / 虚跑，报告会标注）")
     parser.add_argument("--fast", action="store_true", help="模拟模式零延迟")
     parser.add_argument("--profile", choices=["nominal", "degraded"], default="nominal", help="模拟画像")
-    parser.add_argument("--gui", action="store_true", help="启动 Gradio GUI")
+    parser.add_argument("--gui", action="store_true", help="启动浏览器 GUI（交互菜单 [G] 同效）")
     parser.add_argument("--host", default="127.0.0.1", help="GUI 监听地址")
     parser.add_argument("--port", type=int, default=0, help="GUI 端口，0 表示随机可用端口")
     parser.add_argument("--no-browser", action="store_true", help="GUI 启动时不自动打开浏览器")
@@ -290,28 +294,44 @@ def _run_noninteractive(service: AcceptanceService, args: argparse.Namespace) ->
     return _exit_code(report)
 
 
-def _print_menu(service: AcceptanceService, args: argparse.Namespace) -> None:
+def _list_runs(service: AcceptanceService) -> list[tuple[str, Path, Path]]:
+    """历史验收列表：(run_id, report.json, report.html)，新到旧。"""
+    root = service.outputs_root / "runs"
+    runs: list[tuple[str, Path, Path]] = []
+    if not root.is_dir():
+        return runs
+    for run_dir in sorted(root.iterdir(), key=lambda p: p.name, reverse=True):
+        report_json = run_dir / "report.json"
+        if report_json.is_file():
+            runs.append((run_dir.name, report_json, run_dir / "report.html"))
+    return runs
+
+
+def _print_menu(service: AcceptanceService) -> None:
     mode = "模拟演示（不产生真实请求）" if service.mode == "mock" else "EvalScope 实机"
-    scope = "、".join(ITEM_BY_KEY[key].short for key in service.config.run_items())
+    hub = find_assets_root(service.config.get("app.assets_dir") or None)
+    assets_hint = "未配置（离线能力受限，可用 [P] 导入）" if hub is None else describe(hub)
+    runs = _list_runs(service)
+    scope = "、".join(str(ITEM_BY_KEY[key].short) for key in service.config.run_items())
+    width = 62
     print()
-    print(BOLD("=" * 52))
+    print(BOLD("=" * width))
     print(BOLD(f" UCM 推理加速验收工具 (CLI)  v{__version__}"))
-    print(f" 执行引擎: {CYAN(mode)}")
-    print(BOLD("=" * 52))
-    print(f"服务地址: {service.config.get('endpoint.base_url')}")
-    print(f"模型:     {service.config.get('endpoint.model')}")
-    print(f"报告目录: {service.outputs_root}")
-    print(f"验收范围: {scope}")
-    print(DIM("-" * 52))
+    print(BOLD("=" * width))
+    print(f" 引擎: {CYAN(mode)}    范围: {scope}")
+    print(f" 服务: {service.config.get('endpoint.base_url')}    模型: {service.config.get('endpoint.model')}")
+    print(f" 资产包: {assets_hint}")
+    print(f" 输出: {service.outputs_root}（历史报告 {len(runs)} 份）")
+    print(DIM("-" * width))
     for key in ITEM_KEYS:
         meta = ITEM_BY_KEY[key]
-        print(f" [{meta.order}] {meta.name}    {DIM(meta.eta)}")
-    print(" [A] 执行所选测试项")
-    print(" [T] 选择要执行的测试项")
-    print(" [R] 查看最近报告")
-    print(" [S] 修改服务地址 / 模型")
-    print(" [Q] 退出")
-    print(DIM("-" * 52))
+        print(f" [{meta.order}] {meta.name:<14}{DIM(meta.eta)}")
+    print(DIM("-" * width))
+    print(" 执行  [编号] 跑单项/组合（如 1,3-5）  [A] 执行所选范围  [T] 选择范围")
+    print(" 配置  [C] 每项测试配置  [S] 服务/模型/Tokenizer  [P] 资产包导入与校验")
+    print(" 结果  [R] 最近报告  [L] 历史对比  [E] 导出 HTML/PDF/打包")
+    print(" 工具  [D] 环境自检  [G] 打开 GUI（浏览器版）  [Q] 退出")
+    print(DIM("-" * width))
 
 
 def _show_latest(service: AcceptanceService) -> None:
@@ -336,17 +356,443 @@ def _prompt(text: str, default: str = "") -> str:
     return value or default
 
 
-def _choose_scenario(default: str = "dialogue") -> str:
-    mapping = {"1": "dialogue", "2": "code", "3": "office"}
-    print("   [1] 对话   [2] 代码   [3] 办公")
-    choice = _prompt("请选择场景", default)
-    return mapping.get(choice, choice if choice in {"dialogue", "code", "office"} else "dialogue")
+def _prompt_int(text: str, default: int) -> int:
+    raw = _prompt(text, str(default))
+    try:
+        return int(raw)
+    except ValueError:
+        print(YELLOW(f"输入「{raw}」不是整数，保留默认 {default}。"))
+        return default
+
+
+def _parse_numbers(text: str, upper: int, least: int = 1) -> list[int]:
+    """把 1,3-5 之类的编号输入解析为有序去重列表（1-based）。"""
+    tokens = [token for token in re.split(r"[,，、\s]+", str(text).strip()) if token]
+    if not tokens:
+        raise ValueError("选择不能为空")
+    picked: set[int] = set()
+    for token in tokens:
+        match = re.fullmatch(r"(\d+)-(\d+)", token)
+        if match:
+            start, end = int(match.group(1)), int(match.group(2))
+            if start > end:
+                raise ValueError(f"编号区间写反：{token}")
+            picked.update(range(start, end + 1))
+        elif token.isdigit():
+            picked.add(int(token))
+        else:
+            raise ValueError(f"无法识别的选择：{token}")
+    ordered = sorted(value for value in picked if 1 <= value <= upper)
+    if len(ordered) < least:
+        raise ValueError(f"至少选择 {least} 项")
+    return ordered
+
+
+# ---------------------------------------------------------------- 配置子菜单
+
+
+def _config_menu(service: AcceptanceService) -> None:
+    editors = {"1": _config_perf, "2": _config_multiturn, "3": _config_sla,
+               "4": _config_accuracy, "5": _config_agent}
+    while True:
+        cfg = service.config
+        print(BOLD("\n── 每项测试配置（回车保留现值）──"))
+        groups = cfg.get("perf.groups", []) or []
+        if groups:
+            perf_desc = "；".join("并发" + "/".join(str(v) for v in g.get("parallel") or []) for g in groups)
+        else:
+            perf_desc = "未配置"
+        print(f" [1] 基础性能   {perf_desc} · 数据集 {cfg.get('perf.dataset')}")
+        presets = cfg.get("multiturn.scenarios", {}) or {}
+        selected = cfg.get("multiturn.scenarios_selected", []) or []
+        sel_label = "、".join(
+            str((presets.get(key) or {}).get("label", key)) for key in selected
+        ) or "未选择"
+        print(f" [2] 多轮对话   {sel_label} · 会话 {cfg.get('multiturn.conversations')}"
+              f" · 并行 {cfg.get('multiturn.parallel')}"
+              f" · 轮次 {cfg.get('multiturn.min_turns')}-{cfg.get('multiturn.max_turns')}")
+        print(f" [3] SLA        {cfg.get('sla.mode')} · 输入 {cfg.get('sla.input_length')}"
+              f" / 输出 {cfg.get('sla.output_tokens')}"
+              f" · 并发 {cfg.get('sla.auto_tune.lower')}-{cfg.get('sla.auto_tune.upper')}")
+        datasets = cfg.get("accuracy.datasets", {}) or {}
+        enabled = sum(1 for item in datasets.values() if item.get("enabled", True))
+        print(f" [4] 精度       {enabled}/{len(datasets)} 个数据集 · runs {cfg.get('accuracy.runs')}")
+        print(f" [5] Agent      context {cfg.get('agent.context_required')}"
+              f" · 时长 {int(cfg.get('agent.duration_s') or 900) // 60}min"
+              f" · {cfg.get('agent.dataset_name')}")
+        print(" [B] 返回")
+        choice = _prompt("选择", "B").upper()
+        if choice == "B":
+            return
+        editor = editors.get(choice)
+        if editor is None:
+            print(YELLOW("无效选择，请输入 1-5 或 B。"))
+            continue
+        editor(service)
+
+
+def _config_perf(service: AcceptanceService) -> None:
+    cfg = service.config
+    print(BOLD("\n── 基础性能 ──"))
+    groups = cfg.get("perf.groups", []) or [{}]
+    first = groups[0]
+    parallel_raw = _prompt("并发档位（逗号分隔，如 1,2,4,8）",
+                           ",".join(str(v) for v in first.get("parallel") or [8]))
+    try:
+        parallel_values = [int(v) for v in re.split(r"[,，\s]+", parallel_raw) if v.strip()]
+        if not parallel_values:
+            raise ValueError
+    except ValueError:
+        print(RED(f"并发档位格式错误：{parallel_raw}"))
+        return
+    number = _prompt_int("每组请求数", int(first.get("number") or 64))
+    input_tokens = _prompt_int("输入 tokens", int(first.get("input") or 512))
+    output_tokens = _prompt_int("输出 tokens", int(first.get("output") or 64))
+    ratio = _prompt_int("前缀命中率 %（0-100）", int(round(float(first.get("prefix_ratio") or 0) * 100)))
+    prefix_count = _prompt_int("前缀块数", int(first.get("prefix_count") or 2))
+    warmup = _prompt_int("预热请求数", int(cfg.get("perf.warmup_num") or 0))
+    dataset = _prompt("数据集", str(cfg.get("perf.dataset") or "random"))
+    timeout = _prompt_int("请求超时（秒）", int(cfg.get("endpoint.timeout_s", 180) or 180))
+    cfg.set("perf.groups", [{
+        "parallel": [value],
+        "number": max(1, number),
+        "input": max(1, input_tokens),
+        "output": max(1, output_tokens),
+        "prefix_ratio": max(0.0, min(1.0, ratio / 100)),
+        "prefix_count": max(1, prefix_count),
+    } for value in parallel_values])
+    cfg.set("perf.dataset", dataset.strip() or "random")
+    cfg.set("perf.warmup_num", max(0, warmup))
+    cfg.set("endpoint.timeout_s", max(30, timeout))
+    print(GREEN(f"基础性能已更新：{len(parallel_values)} 组并发（{'/'.join(map(str, parallel_values))}）"))
+
+
+def _config_multiturn(service: AcceptanceService) -> None:
+    cfg = service.config
+    print(BOLD("\n── 多轮对话 ──"))
+    presets = cfg.get("multiturn.scenarios", {}) or {}
+    selected = set(cfg.get("multiturn.scenarios_selected", []) or [])
+    keys = list(presets.keys())
+    for index, (key, item) in enumerate(presets.items(), 1):
+        mark = GREEN("✓") if key in selected else DIM("○")
+        print(f" [{index}] {mark} {item.get('label', key)}")
+    text = _prompt("启用场景编号（如 1,3；all=全部；回车保持）", "")
+    if text:
+        try:
+            if text.strip().lower() == "all":
+                chosen = set(keys)
+            else:
+                chosen = {keys[i - 1] for i in _parse_numbers(text, len(keys))}
+        except ValueError as exc:
+            print(RED(str(exc)))
+            return
+        cfg.set("multiturn.scenarios_selected", [key for key in keys if key in chosen])
+    conversations = _prompt_int("会话组数", int(cfg.get("multiturn.conversations", 12) or 12))
+    parallel = _prompt_int("并发会话", int(cfg.get("multiturn.parallel", 4) or 4))
+    min_turns = _prompt_int("最少轮数", int(cfg.get("multiturn.min_turns", 2) or 2))
+    max_turns = _prompt_int("最多轮数", int(cfg.get("multiturn.max_turns", 5) or 5))
+    cfg.set("multiturn.conversations", max(1, conversations))
+    cfg.set("multiturn.parallel", max(1, parallel))
+    cfg.set("multiturn.min_turns", max(1, min_turns))
+    cfg.set("multiturn.max_turns", max(1, max_turns))
+    print(GREEN("多轮对话配置已更新"))
+
+
+def _config_sla(service: AcceptanceService) -> None:
+    cfg = service.config
+    print(BOLD("\n── SLA 自动调优 ──"))
+    mode = _prompt("模式 verify/auto_tune", str(cfg.get("sla.mode") or "auto_tune")).lower()
+    input_len = _prompt_int("输入长度（tokens）", int(cfg.get("sla.input_length") or 65536))
+    output = _prompt_int("输出 tokens", int(cfg.get("sla.output_tokens") or 512))
+    ratio = _prompt_int("前缀命中率 %", int(round(float(cfg.get("sla.prefix_ratio") or 0.9) * 100)))
+    prefix_count = _prompt_int("前缀块数", int(cfg.get("sla.prefix_count") or 8))
+    lower = _prompt_int("调优下限并发", int(cfg.get("sla.auto_tune.lower") or 2))
+    upper = _prompt_int("调优上限并发", int(cfg.get("sla.auto_tune.upper") or 256))
+    cfg.set("sla.mode", mode if mode in {"verify", "auto_tune"} else "auto_tune")
+    cfg.set("sla.input_length", max(1, input_len))
+    cfg.set("sla.output_tokens", max(1, output))
+    cfg.set("sla.prefix_ratio", max(0.0, min(1.0, ratio / 100)))
+    cfg.set("sla.prefix_count", max(1, prefix_count))
+    cfg.set("sla.auto_tune.lower", max(1, lower))
+    cfg.set("sla.auto_tune.upper", max(1, upper))
+    cfg.set("sla.target.concurrency", max(1, upper))
+    print(GREEN("SLA 配置已更新（判定完全由 EvalScope --sla-auto-tune 原生执行）"))
+
+
+def _config_accuracy(service: AcceptanceService) -> None:
+    cfg = service.config
+    print(BOLD("\n── 精度 ──"))
+    datasets = cfg.get("accuracy.datasets", {}) or {}
+    keys = list(datasets.keys())
+    for index, (key, item) in enumerate(datasets.items(), 1):
+        mark = GREEN("✓") if item.get("enabled", True) else DIM("○")
+        print(f" [{index}] {mark} {item.get('label', key)}（{item.get('dataset', key)}）")
+    text = _prompt("启用数据集编号（如 1,2,4；all=全部；回车保持）", "")
+    if text:
+        try:
+            if text.strip().lower() == "all":
+                chosen = set(keys)
+            else:
+                chosen = {keys[i - 1] for i in _parse_numbers(text, len(keys))}
+        except ValueError as exc:
+            print(RED(str(exc)))
+            return
+        for key, item in datasets.items():
+            item["enabled"] = key in chosen
+        cfg.set("accuracy.datasets", datasets)
+    runs = _prompt_int("执行轮数（KVCache 一致性判定需 ≥2）", int(cfg.get("accuracy.runs") or 2))
+    limit = _prompt_int("每数据集样本上限（0 = 全量）", 0)
+    cfg.set("accuracy.runs", max(1, runs))
+    datasets = cfg.get("accuracy.datasets", {}) or {}
+    for item in datasets.values():
+        if limit > 0:
+            item["limit"] = limit
+        else:
+            item.pop("limit", None)
+    cfg.set("accuracy.datasets", datasets)
+    print(GREEN("精度配置已更新（判定由 EvalScope 原生执行）"))
+
+
+def _config_agent(service: AcceptanceService) -> None:
+    cfg = service.config
+    print(BOLD("\n── Agent（AgentX）──"))
+    context = _prompt_int("服务上下文窗口（tokens）", int(cfg.get("agent.context_required") or 262144))
+    duration = _prompt_int("benchmark 时长（分钟，EvalScope 要求 ≥15）",
+                           int(cfg.get("agent.duration_s") or 900) // 60)
+    dataset = _prompt("数据集名", str(cfg.get("agent.dataset_name") or "AgentX-claudecode"))
+    parallel = _prompt_int("并发", int(cfg.get("agent.parallel") or 4))
+    cfg.set("agent.context_required", max(1, context))
+    cfg.set("agent.duration_s", max(900, max(1, duration) * 60))
+    cfg.set("agent.dataset_name", dataset.strip() or "AgentX-claudecode")
+    cfg.set("agent.parallel", max(1, parallel))
+    print(GREEN("Agent 配置已更新（traces 与判定由 EvalScope 原生执行）"))
+
+
+# ---------------------------------------------------------------- 服务 / Tokenizer
+
+
+def _service_menu(service: AcceptanceService) -> None:
+    cfg = service.config
+    print(BOLD("\n── 服务与模型 ──"))
+    base_url = _prompt("服务地址", str(cfg.get("endpoint.base_url")))
+    model = _prompt("模型名称", str(cfg.get("endpoint.model")))
+    try:
+        service.update_endpoint(base_url=base_url, model=model)
+    except UCMAcceptError as exc:
+        print(RED(str(exc)))
+        return
+    print(GREEN("服务配置已更新；下一项测试将开启新报告。"))
+    _tokenizer_menu(service)
+
+
+def _tokenizer_menu(service: AcceptanceService) -> None:
+    cfg = service.config
+    hub = find_assets_root(cfg.get("app.assets_dir") or None)
+    builtin = builtin_tokenizers(hub) if hub else []
+    current = str(cfg.get("perf.tokenizer_path") or "")
+    print(f"\n当前 tokenizer：{current or '（跟随服务端模型）'}")
+    if builtin:
+        print(" 资产包内置：")
+        for index, name in enumerate(builtin[:12], 1):
+            print(f"  [{index}] {name}")
+        if len(builtin) > 12:
+            print(f"  … 共 {len(builtin)} 个")
+    text = _prompt("选择编号 / 输入路径或 hub id（回车保持）", "")
+    if not text:
+        return
+    if text.isdigit() and builtin and 1 <= int(text) <= min(len(builtin), 12):
+        path = str(hub / "tokenizers" / builtin[int(text) - 1])
+        cfg.set("perf.tokenizer_path", path)
+        print(GREEN(f"tokenizer 已设为资产包内置：{path}"))
+        return
+    if text.lower() in {"0", "clear", "none"}:
+        cfg.set("perf.tokenizer_path", "")
+        print(GREEN("tokenizer 已清空（跟随服务端模型）。"))
+        return
+    candidate = Path(text).expanduser()
+    if candidate.exists():
+        cfg.set("perf.tokenizer_path", str(candidate.resolve()))
+    else:
+        cfg.set("perf.tokenizer_path", text)  # hub id 形式，在线时由 evalscope 下载
+    print(GREEN(f"tokenizer 已更新：{cfg.get('perf.tokenizer_path')}"))
+
+
+# ---------------------------------------------------------------- 资产包
+
+
+def _safe_extract(tar_path: Path, dest: Path) -> None:
+    dest = dest.resolve()
+    with tarfile.open(tar_path, "r:gz") as tar:
+        for member in tar.getmembers():
+            target = (dest / member.name).resolve()
+            if not str(target).startswith(str(dest)):
+                raise tarfile.TarError(f"压缩包内路径越界：{member.name}")
+        tar.extractall(dest)
+
+
+def _import_asset_pack(service: AcceptanceService) -> None:
+    raw = _prompt("资源包路径（tar.gz / 分卷 part-00 / 已解压目录）", "")
+    if not raw:
+        return
+    source = Path(raw).expanduser()
+    if not source.exists():
+        print(RED(f"路径不存在：{source}"))
+        return
+    if ".part-" in source.name and source.is_file():
+        merged = source.parent / source.name.rsplit(".part-", 1)[0]
+        if not merged.exists():
+            parts = sorted(source.parent.glob(merged.name + ".part-*"))
+            print(DIM(f"检测到分卷，自动合并 {len(parts)} 个分卷 → {merged.name} …"))
+            with open(merged, "wb") as out:
+                for part in parts:
+                    with open(part, "rb") as chunk:
+                        shutil.copyfileobj(chunk, out)
+        source = merged
+    if source.is_dir():
+        hub = source
+    elif source.is_file() and source.name.endswith((".tar.gz", ".tgz")):
+        dest = Path(_prompt("解压到", str(Path.home() / "ucm-assets"))).expanduser()
+        dest.mkdir(parents=True, exist_ok=True)
+        print(DIM(f"解压 {source.name} → {dest}（大包需要几分钟）…"))
+        try:
+            _safe_extract(source, dest)
+        except (tarfile.TarError, OSError) as exc:
+            print(RED(f"解压失败：{exc}"))
+            return
+        hub = dest
+    else:
+        print(RED("不支持的类型：请提供 tar.gz / part-00 分卷 / 已解压目录"))
+        return
+    if not (hub / "manifest.json").exists():
+        print(YELLOW(f"⚠ {hub} 下没有 manifest.json——可能是缓存目录而非资产包"))
+    total, problems = verify_manifest(hub)
+    if problems:
+        print(RED(f"校验失败：manifest {total} 项中 {len(problems)} 个问题："))
+        for problem in problems:
+            print(f"  · {problem}")
+        return
+    service.config.set("app.assets_dir", str(hub.resolve()))
+    print(GREEN(f"资产包已导入并校验通过（manifest {total} 项）：{hub.resolve()}"))
+    print(DIM(f"持久化方式：export UCM_ASSETS_DIR={hub.resolve()}"))
+
+
+def _assets_menu(service: AcceptanceService) -> None:
+    while True:
+        hub = find_assets_root(service.config.get("app.assets_dir") or None)
+        print(BOLD("\n── 资产包 ──"))
+        print(f" 当前：{describe(hub)}")
+        if hub:
+            total, problems = verify_manifest(hub)
+            if problems:
+                print(YELLOW(f" 校验：manifest {total} 项，发现 {len(problems)} 个问题："))
+                for problem in problems:
+                    print(f"   · {problem}")
+            else:
+                print(GREEN(f" 校验：manifest {total} 项全部完整"))
+            toks = builtin_tokenizers(hub)
+            head = "、".join(toks[:4]) + ("…" if len(toks) > 4 else "")
+            print(f" 内置 tokenizer：{len(toks)} 个" + (f"（{head}）" if toks else ""))
+        print(" [1] 导入资源包（tar.gz / part-00 分卷 / 目录）")
+        print(" [2] 刷新状态与校验")
+        print(" [3] 设置 Tokenizer（内置列表 / 自定义）")
+        print(" [B] 返回")
+        choice = _prompt("选择", "B").upper()
+        if choice == "B":
+            return
+        if choice == "1":
+            _import_asset_pack(service)
+        elif choice == "2":
+            continue
+        elif choice == "3":
+            _tokenizer_menu(service)
+        else:
+            print(YELLOW("无效选择，请输入 1-3 或 B。"))
+
+
+# ---------------------------------------------------------------- 结果
+
+
+def _compare_menu(service: AcceptanceService) -> None:
+    runs = _list_runs(service)
+    if len(runs) < 2:
+        print(YELLOW("历史报告不足 2 份，先完成几次验收再来对比。"))
+        return
+    print(BOLD("\n── 历史验收 ──"))
+    for index, (run_id, report_json, _html) in enumerate(runs[:12], 1):
+        try:
+            conclusion = AcceptanceReport.load_json(report_json).conclusion
+        except Exception:  # noqa: BLE001
+            conclusion = "?"
+        print(f" [{index}] {run_id}   {conclusion}")
+    text = _prompt("选择 2-5 份对比（如 1,2,3；回车返回）", "")
+    if not text:
+        return
+    try:
+        picks = _parse_numbers(text, min(len(runs), 12), least=2)
+    except ValueError as exc:
+        print(RED(str(exc)))
+        return
+    entries = [{"label": runs[i - 1][0], "report": AcceptanceReport.load_json(runs[i - 1][1])}
+               for i in picks[:5]]
+    target = service.outputs_root / f"compare-{time.strftime('%Y%m%d_%H%M%S')}.html"
+    target.write_text(build_compare_html(entries), encoding="utf-8")
+    print(GREEN(f"对比报告已生成：{target}"))
+
+
+def _export_menu(service: AcceptanceService) -> None:
+    runs = _list_runs(service)
+    if not runs:
+        print(YELLOW("暂无验收报告可导出。"))
+        return
+    run_id, report_json, report_html = runs[0]
+    print(f"\n最新验收：{run_id}")
+    print(" [1] HTML 另存   [2] 导出 PDF   [3] 打包 zip（报告+原始数据）   [B] 返回")
+    choice = _prompt("选择", "B").upper()
+    if choice == "1":
+        target = Path(_prompt("另存为", str(service.outputs_root / f"export-{run_id}.html"))).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(report_html if report_html.exists() else report_json.with_suffix(".html"), target)
+        print(GREEN(f"已导出：{target}"))
+    elif choice == "2":
+        try:
+            print(GREEN(f"已导出：{export_pdf(report_html if report_html.exists() else report_json)}"))
+        except Exception as exc:  # noqa: BLE001
+            print(YELLOW(f"PDF 导出失败：{exc}"))
+            print(DIM("需要 weasyprint 或 chromium（pip install '.[pdf]'）。"))
+    elif choice == "3":
+        target = service.outputs_root / f"{run_id}-bundle"
+        shutil.make_archive(str(target), "zip", report_json.parent)
+        print(GREEN(f"已打包：{target}.zip"))
+
+
+# ---------------------------------------------------------------- GUI
+
+
+def _launch_gui(service: AcceptanceService, args: argparse.Namespace) -> None:
+    from .webapp import main as web_main
+
+    print(BOLD("\n启动浏览器 GUI（Ctrl+C 返回菜单）…"))
+    print(DIM(f"  地址：http://{args.host}:{args.port or '随机端口'}"))
+    print(DIM("  GUI 与 CLI 共用同一配置与输出目录；菜单内 [Q] 之外的改动会同步生效。"))
+    try:
+        web_main(
+            config=service.config,
+            mode=service.mode,
+            mock_profile=args.profile,
+            mock_delay_ms=0 if args.fast else None,
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+    except KeyboardInterrupt:
+        pass
+    print(GREEN("GUI 已退出，返回菜单。"))
 
 
 def _interactive(service: AcceptanceService, args: argparse.Namespace) -> int:
     progress = _progress_printer()
     while True:
-        _print_menu(service, args)
+        _print_menu(service)
         try:
             choice = input("请选择: ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -369,12 +815,9 @@ def _interactive(service: AcceptanceService, args: argparse.Namespace) -> int:
                 except ValueError as exc:
                     print(RED(str(exc)))
                     continue
-            scenario = None
-            if "multiturn" in keys and len(keys) == 1:
-                scenario = _choose_scenario(str(service.config.get("multiturn.scenario", "dialogue")))
             try:
                 if len(keys) == 1:
-                    service.run_item(keys[0], scenario=scenario, progress=progress)
+                    service.run_item(keys[0], progress=progress)
                     report = service.current_report()
                 else:
                     report = service.run_all(keys=keys, progress=progress)
@@ -389,7 +832,7 @@ def _interactive(service: AcceptanceService, args: argparse.Namespace) -> int:
             except UCMAcceptError as exc:
                 print(RED(f"执行失败：{exc}"))
                 if "EvalScope" in str(exc):
-                    print(DIM("提示：可先运行 --doctor；演示可用 --mock --fast。"))
+                    print(DIM("提示：可先运行 [D] 自检；演示可用 --mock --fast。"))
             except Exception as exc:  # noqa: BLE001
                 print(RED(f"执行失败：{exc}"))
             try:
@@ -399,9 +842,7 @@ def _interactive(service: AcceptanceService, args: argparse.Namespace) -> int:
         elif normalized == "T":
             current = "、".join(str(service.config.run_items()))
             print(DIM(f"当前范围：{current}"))
-            text = _prompt(
-                "输入要执行的测试项（如 1,3-5 / perf,sla；回车保持不变）", ""
-            )
+            text = _prompt("输入要执行的测试项（如 1,3-5 / perf,sla；回车保持不变）", "")
             if not text:
                 continue
             try:
@@ -411,18 +852,25 @@ def _interactive(service: AcceptanceService, args: argparse.Namespace) -> int:
                 continue
             service.config.set("run.items", keys)
             print(GREEN("验收范围已更新：" + "、".join(ITEM_BY_KEY[key].name for key in keys)))
+        elif normalized == "C":
+            _config_menu(service)
+        elif normalized == "S":
+            _service_menu(service)
+        elif normalized == "P":
+            _assets_menu(service)
         elif normalized == "R":
             _show_latest(service)
-        elif normalized == "S":
-            base_url = _prompt("服务地址", str(service.config.get("endpoint.base_url")))
-            model = _prompt("模型名称", str(service.config.get("endpoint.model")))
-            try:
-                service.update_endpoint(base_url=base_url, model=model)
-                print(GREEN("服务配置已更新；下一项测试将开启新报告。"))
-            except UCMAcceptError as exc:
-                print(RED(str(exc)))
+        elif normalized == "L":
+            _compare_menu(service)
+        elif normalized == "E":
+            _export_menu(service)
+        elif normalized == "D":
+            probe = _prompt("探测服务连通性 y/N", "N").lower() == "y"
+            _doctor(service.config, argparse.Namespace(mock=service.mode == "mock", probe=probe))
+        elif normalized == "G":
+            _launch_gui(service, args)
         else:
-            print(YELLOW("无效选择，请输入 1-5 / 组合（如 1,3）/ A / T / R / S / Q。"))
+            print(YELLOW("无效选择，请输入 1-5 / A / T / C / S / P / R / L / E / D / G / Q。"))
 
 
 def main(argv: list[str] | None = None) -> int:

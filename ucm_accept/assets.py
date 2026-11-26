@@ -31,7 +31,8 @@ from pathlib import Path
 
 ENV_VAR = "UCM_ASSETS_DIR"
 DEFAULT_LINUX_ROOT = Path("/opt/ucm-accept/assets")
-PACK_HINT_DIRS = ("tokenizers", "datasets", "evalscope-cache", "modelscope-cache")
+PACK_HINT_DIRS = ("tokenizers", "datasets", "evalscope-cache", "modelscope-cache",
+                  "hf-cache")
 
 
 def candidate_roots(configured: str | None = None) -> list[Path]:
@@ -104,6 +105,8 @@ def cache_env(root: Path) -> dict[str, str]:
     mapping = (
         ("evalscope-cache", "EVALSCOPE_CACHE"),
         ("modelscope-cache", "MODELSCOPE_CACHE"),
+        ("hf-cache", "HF_HUB_CACHE"),
+        ("hf-cache/datasets", "HF_DATASETS_CACHE"),
     )
     for cache_dir, var in mapping:
         candidate = root / cache_dir

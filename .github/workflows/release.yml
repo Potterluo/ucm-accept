@@ -443,6 +443,17 @@ jobs:
         with:
           name: docker-arm64-image
           path: release-assets/docker-arm64
+      - name: Split oversized files (GitHub Release 单文件上限 2GiB)
+        run: |
+          cd release-assets
+          found=0
+          while IFS= read -r f; do
+            found=1
+            echo "分卷 $f（$(du -h "$f" | cut -f1)）..."
+            split -b 1900M -d "$f" "${f}.part-"
+            rm -f "$f"
+          done < <(find . -type f -size +2000M)
+          [ "$found" = 1 ] && find . -name "*.part-*" -exec ls -lh {} +
       - name: Checksums
         run: |
           cd release-assets
@@ -472,6 +483,7 @@ jobs:
           files: |
             release-assets/**/*.whl
             release-assets/**/*.tar.gz
+            release-assets/**/*.tar.gz.part-*
             release-assets/**/*.deb
             release-assets/**/*.rpm
             release-assets/**/*.zip

@@ -67,7 +67,7 @@ def build_notes(tag: str, repo: str, image: str) -> str:
     add("```bash")
     add(f"docker pull {image}:{tag}")
     add("")
-    add("# 单架构 / 离线加载（release 附带 docker save 导出包）")
+    add("# 单架构 / 离线加载（release 附带 docker save 导出包；若带 .part-00 分卷，先 cat 合并再 load）")
     add(f"docker load -i ucm-accept-{version}-amd64.tar.gz")
     add(f"docker load -i ucm-accept-{version}-arm64.tar.gz")
     add("```")
@@ -75,13 +75,16 @@ def build_notes(tag: str, repo: str, image: str) -> str:
 
     add("### 离线资源包（UCM Accept 无感使用）")
     add("")
-    add(f"{badge('Offline Asset Pack', f'ucm-assets {version}', 'assets', f'{base}/ucm-assets-{version}.tar.gz')} "
-        f"{badge('SHA256', 'checksum', 'grey', f'{base}/ucm-assets-{version}.tar.gz.sha256')}")
+    add(f"{badge('Offline Asset Pack', f'{version} part-00+ 合并', 'assets', f'{base}/ucm-assets-{version}.tar.gz.part-00')} "
+        f"{badge('SHA256', 'merged checksum', 'grey', f'{base}/ucm-assets-{version}.tar.gz.sha256')}")
     add("")
     add("包含 16 个 tokenizer、精度数据集、多轮场景与 AgentX traces（约 5GB）。"
-        "解压后将 `UCM_ASSETS_DIR` 指向解压目录即可离线运行全部验收项：")
+        "超 2GiB 由 CI 自动分卷（GitHub Release 单文件上限），合并校验后解压，"
+        "再把 `UCM_ASSETS_DIR` 指向解压目录即可离线运行全部验收项：")
     add("")
     add("```bash")
+    add(f"cat ucm-assets-{version}.tar.gz.part-* > ucm-assets-{version}.tar.gz")
+    add(f"sha256sum -c ucm-assets-{version}.tar.gz.sha256")
     add(f"tar -xzf ucm-assets-{version}.tar.gz -C ~/ucm-assets")
     add("UCM_ASSETS_DIR=~/ucm-assets ucm-accept --doctor --mock   # 校验 SHA256 与就绪状态")
     add("```")

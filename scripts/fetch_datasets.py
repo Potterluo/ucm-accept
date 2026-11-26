@@ -20,6 +20,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +117,12 @@ def trigger_dataset_download(evalscope_bin: str, dataset: str, source: str,
     return True, output[-300:]
 
 
+def _dir_size(path: Path) -> int:
+    if not path.is_dir():
+        return 0
+    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+
+
 def trigger_multiturn_download(evalscope_bin: str, scenario: str, source: str,
                                work_dir: Path, tokenizer_path: str) -> tuple[bool, str]:
     """触发多轮场景数据集下载（仅 modelscope 源——场景内置下载源）。"""
@@ -123,22 +130,26 @@ def trigger_multiturn_download(evalscope_bin: str, scenario: str, source: str,
         print(f"  跳过 {scenario}：多轮场景数据集仅 modelscope 源", flush=True)
         return True, "skipped"
     cmd = [evalscope_bin, "perf", "--dataset", scenario, "--multi-turn",
-           "--parallel", "1", "--number", "1", "--min-turns", "1", "--max-turns", "1",
-           "--outputs-dir", str(work_dir / scenario), "--no-timestamp"]
+           "--model", "mock-model", "--parallel", "1", "--number", "1",
+           "--min-turns", "1", "--max-turns", "1",
+           "--outputs-dir", str(work_dir / scenario), "--no-timestamp",
+           "--no-test-connection"]
     if tokenizer_path:
         cmd += ["--tokenizer-path", tokenizer_path]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     output = proc.stdout + proc.stderr
-    if _parse_failed(output):
+    if _parse_failed(output) or "is required" in output:
         return False, output[-200:]
-    if proc.returncode != 0:
-        print(f"   退出码 {proc.returncode}（触发式下载以失败请求收尾属预期），tail:", flush=True)
-        print(output[-200:], flush=True)
     return True, output[-200:]
 
 
 def trigger_agentx_download(evalscope_bin: str, source: str, work_dir: Path,
                             tokenizer_path: str = "", api_url: str = "") -> tuple[bool, str]:
+    """下载 AgentX traces。成功标准 = 缓存落盘（打包只依赖数据）。
+
+    缓存体量稳定后提前结束触发进程：没有活端点时 benchmark 阶段只会空转，
+    有活端点时 benchmark 结果也不影响组包（端到端验证属于验收工具自身的职责）。
+    """
     if source == "huggingface":
         print("  跳过 agentx：traces 下载仅 modelscope 源", flush=True)
         return True, "skipped"
@@ -146,16 +157,40 @@ def trigger_agentx_download(evalscope_bin: str, source: str, work_dir: Path,
            "--scenario", json.dumps({"name": "agentx", "variant": "full"}),
            "--model", "mock-model", "--parallel", "1", "--duration", "900",
            "--outputs-dir", str(work_dir / "agentx"), "--no-timestamp",
+           "--no-test-connection",
            "--tokenizer-path", tokenizer_path]
     if api_url:
         cmd += ["--url", api_url]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
-    ok = proc.returncode == 0
-    tail = (proc.stdout + proc.stderr)[-300:]
-    print(f"   {'下载完成' if ok else '下载失败，tail:'}", flush=True)
-    if not ok:
-        print(tail, flush=True)
-    return ok, tail
+    cache_dir = Path.home() / ".cache" / "evalscope" / "agentx"
+    proc = subprocess.Popen(cmd)
+    deadline = time.monotonic() + 2700
+    stable = 0
+    last_size = -1
+    while True:
+        time.sleep(10)
+        size = _dir_size(cache_dir)
+        stable = stable + 1 if (size > 100_000_000 and size == last_size) else 0
+        last_size = size
+        exited = proc.poll() is not None
+        if stable >= 2:
+            if not exited:
+                print("   traces 缓存就绪，提前结束触发进程（跳过 benchmark 阶段）", flush=True)
+                proc.terminate()
+                try:
+                    proc.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            break
+        if exited:
+            break
+        if time.monotonic() > deadline:
+            print("   触发超时（45 分钟），终止", flush=True)
+            proc.kill()
+            break
+    size = _dir_size(cache_dir)
+    ok = size > 100_000_000
+    print(f"   traces 缓存 {size / 1e9:.2f} GB" + ("（就绪）" if ok else "（不足/缺失）"), flush=True)
+    return ok, f"cache_bytes={size}"
 
 
 def assemble(assets_dir: Path) -> None:
@@ -227,17 +262,22 @@ def main() -> int:
         print("   缓存就绪" if ok else "   下载阶段失败（缓存可能已部分落盘）", flush=True)
 
     # ---- 多轮场景 ----
+    tokenizer_path = ""
+    tokenizer_root = assets_dir / "tokenizers"
+    if tokenizer_root.is_dir():
+        first = next(tokenizer_root.iterdir(), None)
+        if first is not None:
+            tokenizer_path = str(first)
     for scenario in scenarios:
         print(f"== 多轮场景 {scenario} ...", flush=True)
         ok, tail = trigger_multiturn_download(args.evalscope_bin, scenario, args.source,
-                                              work_dir, "")
+                                              work_dir, tokenizer_path)
         results.append((f"multiturn:{scenario}", ok))
         print("   done", flush=True)
 
     # ---- AgentX ----
     if include_agentx:
         print("== AgentX traces（约 1.9GB）...", flush=True)
-        tokenizer_path = str(next((assets_dir / "tokenizers").iterdir(), ""))
         ok, tail = trigger_agentx_download(args.evalscope_bin, args.source, work_dir,
                                            tokenizer_path, args.agentx_api_url)
         results.append(("agentx", ok))

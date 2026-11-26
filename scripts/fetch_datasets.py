@@ -90,6 +90,12 @@ def download_tokenizer(repo: str, source: str, dest_root: Path) -> Path | None:
     return dest
 
 
+def _parse_failed(output: str) -> bool:
+    """evalscope 参数级错误（argparse usage/unrecognized）——必失败且与端点无关。"""
+    markers = ("unrecognized arguments", "invalid choice", "the following arguments are required")
+    return any(marker in output for marker in markers)
+
+
 def trigger_dataset_download(evalscope_bin: str, dataset: str, source: str,
                              work_dir: Path, tokenizer_path: str) -> tuple[bool, str]:
     """用必失败的 api-url 触发数据集下载（下载先于请求，缓存落盘）。"""
@@ -102,9 +108,12 @@ def trigger_dataset_download(evalscope_bin: str, dataset: str, source: str,
     if tokenizer_path:
         cmd += ["--tokenizer-path", tokenizer_path]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    output = proc.stdout + proc.stderr
+    if _parse_failed(output):
+        return False, output[-300:]
     # 退出码必然非 0（api-url 不可达是设计使然）：失败的是请求，不是下载。
     # 缓存是否就绪由调用方检查缓存目录，这里只表示“触发完成”。
-    return True, (proc.stdout + proc.stderr)[-300:]
+    return True, output[-300:]
 
 
 def trigger_multiturn_download(evalscope_bin: str, scenario: str, source: str,
@@ -115,11 +124,14 @@ def trigger_multiturn_download(evalscope_bin: str, scenario: str, source: str,
         return True, "skipped"
     cmd = [evalscope_bin, "perf", "--dataset", scenario, "--multi-turn",
            "--parallel", "1", "--number", "1", "--min-turns", "1", "--max-turns", "1",
-           "--work-dir", str(work_dir / scenario), "--no-timestamp"]
+           "--outputs-dir", str(work_dir / scenario), "--no-timestamp"]
     if tokenizer_path:
         cmd += ["--tokenizer-path", tokenizer_path]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-    return True, (proc.stdout + proc.stderr)[-200:]
+    output = proc.stdout + proc.stderr
+    if _parse_failed(output):
+        return False, output[-200:]
+    return True, output[-200:]
 
 
 def trigger_agentx_download(evalscope_bin: str, source: str, work_dir: Path,
@@ -130,7 +142,7 @@ def trigger_agentx_download(evalscope_bin: str, source: str, work_dir: Path,
     cmd = [evalscope_bin, "perf",
            "--scenario", json.dumps({"name": "agentx", "variant": "full"}),
            "--model", "mock-model", "--parallel", "1", "--duration", "900",
-           "--work-dir", str(work_dir / "agentx"), "--no-timestamp",
+           "--outputs-dir", str(work_dir / "agentx"), "--no-timestamp",
            "--tokenizer-path", tokenizer_path]
     if api_url:
         cmd += ["--api-url", api_url]

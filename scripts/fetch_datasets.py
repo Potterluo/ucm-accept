@@ -131,6 +131,9 @@ def trigger_multiturn_download(evalscope_bin: str, scenario: str, source: str,
     output = proc.stdout + proc.stderr
     if _parse_failed(output):
         return False, output[-200:]
+    if proc.returncode != 0:
+        print(f"   退出码 {proc.returncode}（触发式下载以失败请求收尾属预期），tail:", flush=True)
+        print(output[-200:], flush=True)
     return True, output[-200:]
 
 
@@ -145,7 +148,7 @@ def trigger_agentx_download(evalscope_bin: str, source: str, work_dir: Path,
            "--outputs-dir", str(work_dir / "agentx"), "--no-timestamp",
            "--tokenizer-path", tokenizer_path]
     if api_url:
-        cmd += ["--api-url", api_url]
+        cmd += ["--url", api_url]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
     ok = proc.returncode == 0
     tail = (proc.stdout + proc.stderr)[-300:]

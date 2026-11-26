@@ -65,7 +65,7 @@ def build_notes(tag: str, repo: str, image: str) -> str:
     add("### Docker 镜像（多架构，amd64 / arm64 自动匹配）")
     add("")
     add("```bash")
-    add(f"docker pull {image}:{tag}")
+    add(f"docker pull {image}:{version}")
     add("")
     add("# 单架构 / 离线加载（release 附带 docker save 导出包；若带 .part-00 分卷，先 cat 合并再 load）")
     add(f"docker load -i ucm-accept-{version}-amd64.tar.gz")

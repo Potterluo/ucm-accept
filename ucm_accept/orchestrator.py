@@ -797,6 +797,7 @@ class Orchestrator:
             degraded_parallel=int(self.config.get("agent.degraded.parallel", 1)),
             scenario_name=str(self.config.get("agent.scenario_name", "agentx")),
             tokenizer_path=self._tokenizer(),
+            dataset_path=str(self.config.get("agent.dataset_path", "") or ""),
             extra_args=[str(arg) for arg in (self.config.get("agent.extra_args", []) or [])],
         )
         output_dir = ensure_dir(self.raw_root / "agent")

@@ -727,6 +727,9 @@ class EvalScopeEngine(Engine):
         ]
         if params.tokenizer_path:
             argv.extend(["--tokenizer-path", params.tokenizer_path])
+        if params.dataset_path:
+            # 离线资产包：traces.jsonl 快照目录直读，跳过 ModelScope 在线探测
+            argv.extend(["--dataset-path", params.dataset_path])
         if params.duration_s > 0 and not params.degraded:
             argv.extend(["--duration", str(params.duration_s)])
         if endpoint.api_key:

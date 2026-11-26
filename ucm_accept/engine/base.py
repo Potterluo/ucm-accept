@@ -133,6 +133,7 @@ class AgentParams:
     degraded_parallel: int = 1
     scenario_name: str = "agentx"
     tokenizer_path: str = ""
+    dataset_path: str = ""
     extra_args: list[str] = field(default_factory=list)
 
 

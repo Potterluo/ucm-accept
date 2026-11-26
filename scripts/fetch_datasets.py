@@ -200,16 +200,28 @@ ACCURACY_REPO_IDS = {
     "bfcl_v3": "AI-ModelScope/bfcl_v3",
 }
 
-GSM8K_CONFIGS_YAML = """configs:
-  - config_name: main
-    data_files:
-      train: main/train-*.parquet
-      test: main/test-*.parquet
-  - config_name: socratic
-    data_files:
-      train: socratic/train-*.parquet
-      test: socratic/test-*.parquet
-"""
+def _gsm8k_configs_yaml(dest: Path) -> str:
+    """按物化后的实际 parquet 文件生成 configs 声明（README 内嵌 hub 约定）。
+
+    datasets 库对本地目录的 config yaml 仅从 README.md 读取，且 data_files
+    只接受 list-of-{split,path}（不接受通配符）。
+    """
+    rels = sorted(str(pth.relative_to(dest)) for pth in dest.rglob("*.parquet"))
+    def pick(prefix: str) -> str:
+        return next(r for r in rels if r.startswith(prefix))
+    return (
+        "configs:\n"
+        "  - config_name: main\n"
+        "    data_files:\n"
+        f"      - split: train\n        path: {pick('main/train')}\n"
+        f"      - split: test\n        path: {pick('main/test')}\n"
+        "  - config_name: socratic\n"
+        "    data_files:\n"
+        f"      - split: train\n        path: {pick('socratic/train')}\n"
+        f"      - split: test\n        path: {pick('socratic/test')}\n"
+    )
+
+
 
 
 def materialize_accuracy(assets_dir: Path, datasets: list[str]) -> None:
@@ -227,7 +239,7 @@ def materialize_accuracy(assets_dir: Path, datasets: list[str]) -> None:
             print(f"  跳过 {name}：无物化映射", flush=True)
             continue
         dest = assets_dir / "datasets" / "accuracy" / name
-        if (dest / "gsm8k.yaml").exists() or any(dest.glob("*.parquet")) or (dest / "train.jsonl").exists():
+        if (dest / "README.md").exists() or any(dest.glob("*.parquet")) or (dest / "train.jsonl").exists():
             print(f"  {name}: 已物化，跳过", flush=True)
             continue
         try:
@@ -244,7 +256,9 @@ def materialize_accuracy(assets_dir: Path, datasets: list[str]) -> None:
                 shutil.copy2(f, target)
                 count += 1
         if name == "gsm8k":
-            (dest / "gsm8k.yaml").write_text(GSM8K_CONFIGS_YAML, encoding="utf-8")
+            yaml_text = _gsm8k_configs_yaml(dest)
+            (dest / "gsm8k.yaml").write_text(yaml_text, encoding="utf-8")
+            (dest / "README.md").write_text("---\n" + yaml_text + "---\n", encoding="utf-8")
         size = sum(x.stat().st_size for x in dest.rglob("*") if x.is_file())
         print(f"  {name}: 物化 {count} 个文件（{size / 1048576:.1f} MB）→ {dest}", flush=True)
 

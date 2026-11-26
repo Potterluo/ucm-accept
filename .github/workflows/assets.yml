@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       tokenizer_repo:
-        description: "tokenizer 仓库（ModelScope 或 HF id，覆盖清单）"
+        description: "tokenizer 仓库，逗号分隔（留空 = 清单全部）"
         required: false
-        default: "Qwen/Qwen2.5-0.5B-Instruct"
+        default: ""
       source:
         description: "下载源"
         type: choice
@@ -48,6 +48,12 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/share/rust /usr/local/share/boost /usr/lib/jvm \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup 2>/dev/null || true
+          df -h /
       - name: Install
         run: |
           python -m pip install --upgrade pip
@@ -56,7 +62,7 @@ jobs:
           df -h /
       - name: Download tokenizer / dataset caches
         env:
-          UCM_TOKENIZER: ${{ inputs.tokenizer_repo || 'Qwen/Qwen2.5-0.5B-Instruct' }}
+          UCM_TOKENIZER: ${{ inputs.tokenizer_repo }}
         run: |
           python scripts/fetch_datasets.py \
             --assets-dir ucm-assets \
@@ -65,6 +71,7 @@ jobs:
             --tokenizer-repo "$UCM_TOKENIZER" \
             --datasets "${{ inputs.datasets }}" \
             --evalscope-bin "$(command -v evalscope)" \
+            --move-caches \
             ${{ inputs.include_agentx && '--include-agentx' || '' }}
           df -h /
       - name: Manifest + verify

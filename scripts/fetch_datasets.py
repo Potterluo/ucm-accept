@@ -193,8 +193,13 @@ def trigger_agentx_download(evalscope_bin: str, source: str, work_dir: Path,
     return ok, f"cache_bytes={size}"
 
 
-def assemble(assets_dir: Path) -> None:
-    """把本机缓存复制进资产包数据层（覆盖式，保留 tokenizers/）。"""
+def assemble(assets_dir: Path, move: bool = False) -> None:
+    """把本机缓存放进资产包数据层（覆盖式，保留 tokenizers/）。
+
+    move=True（CI 用）：同卷 rename，零额外磁盘占用——runner 磁盘有限，
+    复制模式会让缓存在包内再翻一倍；源缓存是临时产物，移动后无需保留。
+    本地默认复制，~/.cache 保持可用。
+    """
     for dest_name, cache_root in CACHE_ROOTS.items():
         if not cache_root.is_dir():
             print(f"跳过 {dest_name}：{cache_root} 不存在", flush=True)
@@ -203,13 +208,17 @@ def assemble(assets_dir: Path) -> None:
         dest.mkdir(parents=True, exist_ok=True)
         for item in cache_root.iterdir():
             target = dest / item.name
-            if item.is_dir():
+            if move:
+                if target.exists():
+                    shutil.rmtree(target) if target.is_dir() else target.unlink()
+                shutil.move(str(item), str(target))
+            elif item.is_dir():
                 if target.exists():
                     shutil.rmtree(target)
                 shutil.copytree(item, target, symlinks=True)
             else:
                 shutil.copy2(item, target)
-        print(f"已复制 {dest_name} ← {cache_root}", flush=True)
+        print(f"已{'移动' if move else '复制'} {dest_name} ← {cache_root}", flush=True)
 
 
 def main() -> int:
@@ -220,7 +229,7 @@ def main() -> int:
     parser.add_argument("--source", choices=["modelscope", "huggingface", "auto"],
                         default="auto", help="下载源（auto=modelscope 失败回退 hf）")
     parser.add_argument("--tokenizer-repo", default=None,
-                        help="tokenizer 仓库 id（覆盖清单），如 Qwen/Qwen2.5-0.5B-Instruct")
+                        help="tokenizer 仓库 id，逗号分隔（覆盖清单），如 Qwen/Qwen3-0.6B,ZhipuAI/GLM-5.3")
     parser.add_argument("--datasets", default=None,
                         help="精度数据集列表（逗号分隔，覆盖清单）")
     parser.add_argument("--no-multiturn", action="store_true", help="跳过多轮场景下载")
@@ -228,6 +237,8 @@ def main() -> int:
     parser.add_argument("--agentx-api-url", default="",
                         help="AgentX benchmark 的被测端点（留空 = 只下载 traces 后失败退出）")
     parser.add_argument("--evalscope-bin", default="evalscope")
+    parser.add_argument("--move-caches", action="store_true",
+                        help="组装时移动缓存（同卷 rename，省磁盘；CI 用）")
     parser.add_argument("--skip-cache-copy", action="store_true", help="只下载不组装（调试用）")
     args = parser.parse_args()
 
@@ -236,8 +247,8 @@ def main() -> int:
     manifest_path = Path(args.manifest).resolve()
     manifest = load_manifest(manifest_path if manifest_path.exists() else None)
 
-    tokenizer_repos = ([args.tokenizer_repo] if args.tokenizer_repo
-                       else list(manifest.get("tokenizers", [])))
+    tokenizer_repos = ([x.strip() for x in args.tokenizer_repo.split(",") if x.strip()]
+                       if args.tokenizer_repo else list(manifest.get("tokenizers", [])))
     datasets = ([x.strip() for x in args.datasets.split(",") if x.strip()]
                 if args.datasets else list(manifest.get("datasets", [])))
     scenarios = [] if args.no_multiturn else list(manifest.get("multiturn_scenarios", []))
@@ -265,9 +276,8 @@ def main() -> int:
     tokenizer_path = ""
     tokenizer_root = assets_dir / "tokenizers"
     if tokenizer_root.is_dir():
-        first = next(tokenizer_root.iterdir(), None)
-        if first is not None:
-            tokenizer_path = str(first)
+        first = sorted(p for p in tokenizer_root.iterdir() if p.is_dir())
+        tokenizer_path = str(first[0]) if first else ""
     for scenario in scenarios:
         print(f"== 多轮场景 {scenario} ...", flush=True)
         ok, tail = trigger_multiturn_download(args.evalscope_bin, scenario, args.source,
@@ -284,7 +294,7 @@ def main() -> int:
 
     # ---- 组装数据层 ----
     if not args.skip_cache_copy:
-        assemble(assets_dir)
+        assemble(assets_dir, move=args.move_caches)
 
     summary = {name: {"ok": ok} for name, ok in results}
     (assets_dir / "fetch-summary.json").write_text(

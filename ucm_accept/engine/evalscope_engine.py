@@ -445,7 +445,6 @@ class EvalScopeEngine(Engine):
 
     # -------------------------------------------------------------- multiturn
     def _multiturn_argv(self, endpoint: Endpoint, params: MultiturnParams, output_dir: Path) -> list[str]:
-        builtin = bool(params.dataset_name)
         mapping = self._base_mapping(endpoint, output_dir)
         mapping.update(
             {
@@ -472,7 +471,8 @@ class EvalScopeEngine(Engine):
             "--dataset",
             params.dataset_name or "custom_multi_turn",
         ]
-        if not builtin:
+        if params.dataset_path:
+            # 本地镜像与内置场景名可并存：--dataset-path 让 evalscope 零网络直读资产包
             argv.extend(["--dataset-path", str(params.dataset_path)])
         if params.tokenizer_path:
             argv.extend(["--tokenizer-path", params.tokenizer_path])

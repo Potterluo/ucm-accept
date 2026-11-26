@@ -193,6 +193,62 @@ def trigger_agentx_download(evalscope_bin: str, source: str, work_dir: Path,
     return ok, f"cache_bytes={size}"
 
 
+ACCURACY_REPO_IDS = {
+    "gpqa_diamond": "AI-ModelScope/gpqa_diamond",
+    "gsm8k": "AI-ModelScope/gsm8k",
+    "longbench_v2": "ZhipuAI/LongBench-v2",
+    "bfcl_v3": "AI-ModelScope/bfcl_v3",
+}
+
+GSM8K_CONFIGS_YAML = """configs:
+  - config_name: main
+    data_files:
+      train: main/train-*.parquet
+      test: main/test-*.parquet
+  - config_name: socratic
+    data_files:
+      train: socratic/train-*.parquet
+      test: socratic/test-*.parquet
+"""
+
+
+def materialize_accuracy(assets_dir: Path, datasets: list[str]) -> None:
+    """把精度数据集物化为普通数据目录（<pack>/datasets/accuracy/<name>/）。
+
+    离线验收经 evalscope --dataset-args 的 local_path 加载本地镜像（BenchmarkMeta
+    明确支持本地镜像完全替换远程源），规避 modelscope SDK 的网络优先探测。
+    """
+    from modelscope.hub.snapshot_download import snapshot_download
+
+    keep_suffixes = {".json", ".jsonl", ".parquet", ".yaml", ".csv"}
+    for name in datasets:
+        repo = ACCURACY_REPO_IDS.get(name)
+        if not repo:
+            print(f"  跳过 {name}：无物化映射", flush=True)
+            continue
+        dest = assets_dir / "datasets" / "accuracy" / name
+        if (dest / "gsm8k.yaml").exists() or any(dest.glob("*.parquet")) or (dest / "train.jsonl").exists():
+            print(f"  {name}: 已物化，跳过", flush=True)
+            continue
+        try:
+            snap = Path(snapshot_download(repo, repo_type="dataset"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {name}: 物化失败（{exc}）", flush=True)
+            continue
+        dest.mkdir(parents=True, exist_ok=True)
+        count = 0
+        for f in snap.rglob("*"):
+            if f.is_file() and (f.suffix in keep_suffixes or f.name == "dataset_infos.json"):
+                target = dest / f.relative_to(snap)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, target)
+                count += 1
+        if name == "gsm8k":
+            (dest / "gsm8k.yaml").write_text(GSM8K_CONFIGS_YAML, encoding="utf-8")
+        size = sum(x.stat().st_size for x in dest.rglob("*") if x.is_file())
+        print(f"  {name}: 物化 {count} 个文件（{size / 1048576:.1f} MB）→ {dest}", flush=True)
+
+
 def assemble(assets_dir: Path, move: bool = False) -> None:
     """把本机缓存放进资产包数据层（覆盖式，保留 tokenizers/）。
 
@@ -271,6 +327,10 @@ def main() -> int:
                                             work_dir, "")
         results.append((f"dataset:{dataset}", ok))
         print("   缓存就绪" if ok else "   下载阶段失败（缓存可能已部分落盘）", flush=True)
+
+    # ---- 精度数据集物化（local_path 本地镜像，供离线 --dataset-args）----
+    for name in datasets:
+        materialize_accuracy(assets_dir, [name])
 
     # ---- 多轮场景 ----
     tokenizer_path = ""

@@ -769,7 +769,8 @@ class Orchestrator:
                 detected = self.engine.detect_context(self._endpoint())
             except Exception as exc:  # noqa: BLE001
                 self._emit(f"自动探测上下文失败：{exc}", level="warning")
-        degraded = bool(detected and detected < target)
+        degraded = bool(detected and detected < target) or bool(
+            self.config.get("agent.force_smoke", False))
         if detected is None:
             self._emit(
                 "无法从 /v1/models 探测 max_model_len，按目标上下文执行，未触发降级",

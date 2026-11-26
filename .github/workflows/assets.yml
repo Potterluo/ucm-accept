@@ -58,7 +58,8 @@ jobs:
           git clone --depth 1 https://github.com/Potterluo/GPT-Zero.git /tmp/gpt-zero
           pip install -e /tmp/gpt-zero
           python -u -m gptzero.cli --port 8877 --host 127.0.0.1 > /tmp/gpt-zero.log 2>&1 &
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8877/v1/models && break; sleep 2; done
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8877/v1/models > /dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:8877/v1/models > /dev/null || { echo "GPT-Zero 60s 内未就绪"; tail -20 /tmp/gpt-zero.log; exit 1; }
       - name: Download tokenizer / dataset caches
         env:
           UCM_TOKENIZER: ${{ inputs.tokenizer_repo || 'Qwen/Qwen2.5-0.5B-Instruct' }}

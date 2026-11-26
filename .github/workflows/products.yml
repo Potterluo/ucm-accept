@@ -69,6 +69,7 @@ jobs:
       - name: Build (linux)
         if: matrix.platform == 'linux'
         run: |
+          pip install -e ".[gui,build]" "evalscope[perf,service]==1.15.0"
           VERSION="${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}"
           ./scripts/build_linux.sh "${VERSION#v}" ${{ matrix.arch }}
       - name: Upload (windows)
@@ -150,13 +151,13 @@ jobs:
       - name: Merge multi-arch manifest
         run: |
           IMAGE="ghcr.io/potterluo/ucm-accept"
-          TAGS="$IMAGE:dev"
+          set -f  # 防止 :latest 等被 shell 展开
+          ARGS=(-t "$IMAGE:dev")
           if [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${{ github.ref_name }}"
-            VERSION="${VERSION#v}"
-            TAGS="$TAGS $IMAGE:$VERSION $IMAGE:latest"
+            ARGS+=(-t "$IMAGE:${VERSION#v}" -t "$IMAGE:latest")
           fi
-          docker buildx imagetools create $TAGS \
+          docker buildx imagetools create "${ARGS[@]}" \
             "$IMAGE:${{ github.sha }}-amd64" "$IMAGE:${{ github.sha }}-arm64"
       - name: Verify
         run: docker buildx imagetools inspect ghcr.io/potterluo/ucm-accept:dev

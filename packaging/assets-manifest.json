@@ -1,0 +1,8 @@
+{
+  "tokenizers": ["Qwen/Qwen2.5-0.5B-Instruct"],
+  "datasets": ["gsm8k", "gpqa_diamond", "longbench_v2", "bfcl_v3"],
+  "multiturn_scenarios": ["share_gpt_zh_multi_turn", "share_gpt_en_multi_turn",
+                          "trie_agentic_coding", "trie_code_qa", "trie_office_work",
+                          "swe_smith"],
+  "include_agentx": false
+}

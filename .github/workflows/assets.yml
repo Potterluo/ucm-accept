@@ -1,27 +1,47 @@
-name: assets
+name: download-assets
+
+# 离线资产包：下载 tokenizer / 数据集缓存 → 组包 → 发布。
+# 触发：手动（可配源与内容）/ 资源清单或脚本变更 / release 发布时自动附带。
+# 清单：packaging/assets-manifest.json（tokenizers / datasets / 多轮场景 / agentx）
 
 on:
   workflow_dispatch:
     inputs:
+      tokenizer_repo:
+        description: "tokenizer 仓库（ModelScope 或 HF id，覆盖清单）"
+        required: false
+        default: "Qwen/Qwen2.5-0.5B-Instruct"
+      source:
+        description: "下载源"
+        type: choice
+        default: auto
+        options: [auto, modelscope, huggingface]
+      datasets:
+        description: "精度数据集（逗号分隔，留空 = 清单默认）"
+        required: false
+        default: ""
       include_agentx:
-        description: "包含 AgentX traces（约 1.9GB，构建时间显著增加）"
+        description: "包含 AgentX traces（约 1.9GB）"
         type: boolean
         default: false
   push:
     branches: [main]
     paths:
+      - "packaging/assets-manifest.json"
       - "scripts/fetch_datasets.py"
       - "scripts/prepare_assets.py"
       - ".github/workflows/assets.yml"
+  release:
+    types: [published]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-assets:
     name: offline asset pack
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,15 +54,17 @@ jobs:
           pip install -e ".[gui]" "evalscope[perf,eval,agentx]" "httpx[socks]"
       - name: Prepare asset skeleton
         run: python scripts/prepare_assets.py --assets-dir ucm-assets --init --seed-bundled
-      - name: Fetch dataset caches (network warm-up)
+      - name: Download tokenizer / dataset caches
         env:
-          UCM_TOKENIZER: ${{ github.workspace }}/ucm-assets/tokenizers/Qwen2.5-0.5B-Instruct
+          UCM_TOKENIZER: ${{ inputs.tokenizer_repo || 'Qwen/Qwen2.5-0.5B-Instruct' }}
         run: |
           python scripts/fetch_datasets.py \
             --assets-dir ucm-assets \
-            --datasets all \
-            --evalscope-bin ${{ github.workspace }}/.venv/bin/evalscope \
-            --tokenizer-path "$UCM_TOKENIZER" \
+            --manifest packaging/assets-manifest.json \
+            --source "${{ inputs.source || 'auto' }}" \
+            --tokenizer-repo "$UCM_TOKENIZER" \
+            --datasets "${{ inputs.datasets }}" \
+            --evalscope-bin "$PWD/.venv/bin/evalscope" \
             ${{ inputs.include_agentx && '--include-agentx' || '' }}
       - name: Manifest + verify
         run: |
@@ -50,16 +72,29 @@ jobs:
           python scripts/prepare_assets.py --assets-dir ucm-assets --output ucm-assets/manifest.json
           python scripts/prepare_assets.py --assets-dir ucm-assets --check
       - name: Pack
+        id: pack
         run: |
-          VERSION="$(python -c 'from ucm_accept import __version__; print(__version__)')"
-          tar -czf "ucm-assets-${VERSION}.tar.gz" -C ucm-assets .
-          echo "ASSET_FILE=ucm-assets-${VERSION}.tar.gz" >> "$GITHUB_ENV"
-          sha256sum "ucm-assets-${VERSION}.tar.gz" > "ucm-assets-${VERSION}.tar.gz.sha256"
-      - uses: actions/upload-artifact@v4
+          VERSION="${{ github.event.release.tag_name || 'dev' }}"
+          VERSION="${VERSION#v}"
+          FILE="ucm-assets-${VERSION:-dev}.tar.gz"
+          tar -czf "$FILE" -C ucm-assets .
+          sha256sum "$FILE" > "$FILE.sha256"
+          echo "ASSET_FILE=$FILE" >> "$GITHUB_ENV"
+          echo "ASSET_SHA=$FILE.sha256" >> "$GITHUB_ENV"
+      - name: Upload to release (release builds only)
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "$ASSET_FILE" "$ASSET_SHA" -R "$GITHUB_REPOSITORY" --clobber
+      - name: Upload artifact (dispatch / push builds)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
         with:
           name: offline-asset-pack
           path: |
-            ucm-assets-*.tar.gz
-            ucm-assets-*.tar.gz.sha256
+            ${{ env.ASSET_FILE }}
+            ${{ env.ASSET_SHA }}
           retention-days: 30
           if-no-files-found: error

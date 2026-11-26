@@ -1,0 +1,65 @@
+name: assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_agentx:
+        description: "包含 AgentX traces（约 1.9GB，构建时间显著增加）"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "scripts/fetch_datasets.py"
+      - "scripts/prepare_assets.py"
+      - ".github/workflows/assets.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-assets:
+    name: offline asset pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[gui]" "evalscope[perf,eval,agentx]" "httpx[socks]"
+      - name: Prepare asset skeleton
+        run: python scripts/prepare_assets.py --assets-dir ucm-assets --init --seed-bundled
+      - name: Fetch dataset caches (network warm-up)
+        env:
+          UCM_TOKENIZER: ${{ github.workspace }}/ucm-assets/tokenizers/Qwen2.5-0.5B-Instruct
+        run: |
+          python scripts/fetch_datasets.py \
+            --assets-dir ucm-assets \
+            --datasets all \
+            --evalscope-bin ${{ github.workspace }}/.venv/bin/evalscope \
+            --tokenizer-path "$UCM_TOKENIZER" \
+            ${{ inputs.include_agentx && '--include-agentx' || '' }}
+      - name: Manifest + verify
+        run: |
+          rm -rf ucm-assets/.fetch-work
+          python scripts/prepare_assets.py --assets-dir ucm-assets --output ucm-assets/manifest.json
+          python scripts/prepare_assets.py --assets-dir ucm-assets --check
+      - name: Pack
+        run: |
+          VERSION="$(python -c 'from ucm_accept import __version__; print(__version__)')"
+          tar -czf "ucm-assets-${VERSION}.tar.gz" -C ucm-assets .
+          echo "ASSET_FILE=ucm-assets-${VERSION}.tar.gz" >> "$GITHUB_ENV"
+          sha256sum "ucm-assets-${VERSION}.tar.gz" > "ucm-assets-${VERSION}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-asset-pack
+          path: |
+            ucm-assets-*.tar.gz
+            ucm-assets-*.tar.gz.sha256
+          retention-days: 30
+          if-no-files-found: error

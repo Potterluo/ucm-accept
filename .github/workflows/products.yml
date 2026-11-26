@@ -1,0 +1,162 @@
+name: build-products
+
+# 产物构建：桌面应用（Windows / Linux × x64 / ARM64）+ Docker 多架构镜像（GHCR）。
+# PyInstaller 不支持交叉编译：桌面产物在对应原生 runner 上构建；
+# Docker 双架构各在原生 runner 构建推送，再合并 multi-arch manifest（避免 QEMU 慢速构建）。
+# 触发：手动 / v* tag（tag 时桌面产物挂到 Release，镜像打版本号 + latest）。
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  NFPM_VERSION: "2.49.0"
+
+jobs:
+  test:
+    name: gate (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Test
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pytest -q
+
+  desktop:
+    name: desktop (${{ matrix.platform }} / ${{ matrix.arch }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: windows, os: windows-latest, arch: x64 }
+          - { platform: windows, os: windows-11-arm, arch: arm64 }
+          - { platform: linux, os: ubuntu-latest, arch: amd64 }
+          - { platform: linux, os: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install nfpm (linux)
+        if: matrix.platform == 'linux'
+        run: |
+          case "$(uname -m)" in
+            x86_64)  NF_ASSET="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" ;;
+            aarch64) NF_ASSET="nfpm_${NFPM_VERSION}_Linux_arm64.tar.gz" ;;
+            *) echo "未知架构：$(uname -m)"; exit 1 ;;
+          esac
+          curl -sfL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/${NF_ASSET}" | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nfpm /usr/local/bin/nfpm
+      - name: Build (windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./packaging/build_windows.ps1 -Arch ${{ matrix.arch }}
+      - name: Build (linux)
+        if: matrix.platform == 'linux'
+        run: |
+          VERSION="${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}"
+          ./scripts/build_linux.sh "${VERSION#v}" ${{ matrix.arch }}
+      - name: Upload (windows)
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ucm-accept-windows-${{ matrix.arch }}
+          path: dist/ucm-accept-windows-${{ matrix.arch }}.zip
+          if-no-files-found: error
+      - name: Upload (linux)
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ucm-accept-linux-${{ matrix.arch }}
+          path: |
+            dist/ucm-accept-linux-*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+          if-no-files-found: error
+      - name: Attach to release (tags)
+        if: github.ref_type == 'tag' && matrix.platform == 'linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ github.ref_name }}" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "${{ github.ref_name }}" --generate-notes -R "$GITHUB_REPOSITORY"
+          gh release upload "${{ github.ref_name }}" \
+            dist/ucm-accept-linux-*.tar.gz dist/*.deb dist/*.rpm -R "$GITHUB_REPOSITORY" --clobber
+      - name: Attach to release (tags)
+        if: github.ref_type == 'tag' && matrix.platform == 'windows'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ github.ref_name }}" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "${{ github.ref_name }}" --generate-notes -R "$GITHUB_REPOSITORY"
+          gh release upload "${{ github.ref_name }}" \
+            dist/ucm-accept-windows-*.zip -R "$GITHUB_REPOSITORY" --clobber
+
+  docker:
+    name: docker (${{ matrix.arch }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, os: ubuntu-latest }
+          - { arch: arm64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Push per-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          tags: ghcr.io/potterluo/ucm-accept:${{ github.sha }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+          cache-to: type=gha,scope=docker-${{ matrix.arch }},mode=max
+
+  docker-merge:
+    name: docker manifest (multi-arch)
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Merge multi-arch manifest
+        run: |
+          IMAGE="ghcr.io/potterluo/ucm-accept"
+          TAGS="$IMAGE:dev"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+            TAGS="$TAGS $IMAGE:$VERSION $IMAGE:latest"
+          fi
+          docker buildx imagetools create $TAGS \
+            "$IMAGE:${{ github.sha }}-amd64" "$IMAGE:${{ github.sha }}-arm64"
+      - name: Verify
+        run: docker buildx imagetools inspect ghcr.io/potterluo/ucm-accept:dev

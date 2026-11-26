@@ -1,7 +1,7 @@
 name: download-assets
 
 # 离线资产包：下载 tokenizer / 数据集缓存 → 组包 → 发布。
-# 触发：手动（可配源与内容）/ 资源清单或脚本变更 / release 发布时自动附带。
+# 触发：手动（可配源与内容）/ 资源清单或脚本变更。release 附带的资产包由 release.yml 的 asset-pack job 构建。
 # 清单：packaging/assets-manifest.json（tokenizers / datasets / 多轮场景 / agentx）
 
 on:
@@ -31,8 +31,6 @@ on:
       - "scripts/fetch_datasets.py"
       - "scripts/prepare_assets.py"
       - ".github/workflows/assets.yml"
-  release:
-    types: [published]
 
 permissions:
   contents: write
@@ -89,15 +87,7 @@ jobs:
           sha256sum "$FILE" > "$FILE.sha256"
           echo "ASSET_FILE=$FILE" >> "$GITHUB_ENV"
           echo "ASSET_SHA=$FILE.sha256" >> "$GITHUB_ENV"
-      - name: Upload to release (release builds only)
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
-            "$ASSET_FILE" "$ASSET_SHA" -R "$GITHUB_REPOSITORY" --clobber
       - name: Upload artifact (dispatch / push builds)
-        if: github.event_name != 'release'
         uses: actions/upload-artifact@v4
         with:
           name: offline-asset-pack

@@ -3,12 +3,10 @@ name: build-products
 # 产物构建：桌面应用（Windows / Linux × x64 / ARM64）+ Docker 多架构镜像（GHCR）。
 # PyInstaller 不支持交叉编译：桌面产物在对应原生 runner 上构建；
 # Docker 双架构各在原生 runner 构建推送，再合并 multi-arch manifest（避免 QEMU 慢速构建）。
-# 触发：手动 / v* tag（tag 时桌面产物挂到 Release，镜像打版本号 + latest）。
+# dev 验证通道：仅手动触发；正式发版走 release.yml（tag 触发，带校验与徽标下载页）。
 
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*"]
 
 permissions:
   contents: write
@@ -89,24 +87,6 @@ jobs:
             dist/*.deb
             dist/*.rpm
           if-no-files-found: error
-      - name: Attach to release (tags)
-        if: github.ref_type == 'tag' && matrix.platform == 'linux'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "${{ github.ref_name }}" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "${{ github.ref_name }}" --generate-notes -R "$GITHUB_REPOSITORY"
-          gh release upload "${{ github.ref_name }}" \
-            dist/ucm-accept-linux-*.tar.gz dist/*.deb dist/*.rpm -R "$GITHUB_REPOSITORY" --clobber
-      - name: Attach to release (tags)
-        if: github.ref_type == 'tag' && matrix.platform == 'windows'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "${{ github.ref_name }}" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "${{ github.ref_name }}" --generate-notes -R "$GITHUB_REPOSITORY"
-          gh release upload "${{ github.ref_name }}" \
-            dist/ucm-accept-windows-*.zip -R "$GITHUB_REPOSITORY" --clobber
 
   docker:
     name: docker (${{ matrix.arch }})

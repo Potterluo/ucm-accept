@@ -122,7 +122,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends binutils patchelf curl
           python -m pip install --upgrade pip
-          pip install -e ".[gui,build]" "evalscope[perf,service]>=1.15,<2"
+          pip install -e ".[gui,build]" "evalscope[perf,service]==1.15.0"
       - name: Install nfpm (${{ matrix.nfpm_arch }})
         run: |
           NFPM_VERSION=2.43.0
@@ -160,38 +160,38 @@ jobs:
           if-no-files-found: error
 
   windows-exe:
-    name: windows exe
-    runs-on: windows-latest
+    name: windows exe (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     needs: prepare
     timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install build dependencies
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[gui,build]"
-          pip install "evalscope[perf,service]>=1.15,<2"
       - name: Build
         shell: pwsh
-        run: |
-          pyinstaller --noconfirm --clean packaging/ucm-accept.spec
+        run: ./packaging/build_windows.ps1 -Arch ${{ matrix.arch }}
       - name: Validate Windows executable
         shell: pwsh
         run: |
           & "dist\ucm-accept\ucm-accept.exe" --version
           & "dist\ucm-accept\ucm-accept.exe" --mock --fast --item perf --outputs "$env:RUNNER_TEMP\ucm-exe-smoke"
           if (-not (Test-Path "$env:RUNNER_TEMP\ucm-exe-smoke\runs\*\report.html")) { throw "smoke report missing" }
-          Compress-Archive -Path "dist\ucm-accept\*" -DestinationPath "dist\ucm-accept-windows-x64.zip" -Force
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: windows-x64-exe
-          path: dist/ucm-accept-windows-x64.zip
+          name: windows-${{ matrix.arch }}-exe
+          path: dist/ucm-accept-windows-${{ matrix.arch }}.zip
           if-no-files-found: error
 
   offline-wheelhouse:
@@ -218,7 +218,7 @@ jobs:
           mkdir -p offline/wheelhouse
           python -m pip install --upgrade pip wheel
           pip download --prefer-binary -d offline/wheelhouse \
-            "evalscope[perf,service]>=1.15,<2" "gradio>=6.0,<7" "PyYAML>=6" "wheel" "setuptools"
+            "evalscope[perf,service]==1.15.0" "gradio>=6.0,<7" "PyYAML>=6" "wheel" "setuptools"
           # 少数包（如 jieba）只发源码包；在构建机先转成 wheel，保证客户现场不用编译器。
           find offline/wheelhouse -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 \
             | xargs -0 -r -n1 python -m pip wheel --no-deps --wheel-dir offline/wheelhouse
@@ -228,7 +228,7 @@ jobs:
         run: |
           python -m venv /tmp/offline-venv
           /tmp/offline-venv/bin/pip install --no-index --find-links offline/wheelhouse \
-            "ucm-accept==${{ needs.prepare.outputs.version }}" "evalscope[perf,service]>=1.15,<2"
+            "ucm-accept==${{ needs.prepare.outputs.version }}" "evalscope[perf,service]==1.15.0"
           /tmp/offline-venv/bin/ucm-accept --version
           /tmp/offline-venv/bin/ucm-accept --mock --fast --item perf --outputs /tmp/offline-smoke
       - name: Build tooling bundle
@@ -243,6 +243,55 @@ jobs:
         with:
           name: offline-tooling-${{ matrix.arch }}
           path: ucm-accept-offline-tooling-*.tar.gz
+          if-no-files-found: error
+
+  asset-pack:
+    name: offline asset pack
+    runs-on: ubuntu-latest
+    needs: prepare
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/share/rust /usr/local/share/boost /usr/lib/jvm \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup 2>/dev/null || true
+          df -h /
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[gui]" "evalscope[perf,eval,agentx]==1.15.0" "httpx[socks]"
+          pip cache purge || true
+          df -h /
+      - name: Download tokenizer / dataset / AgentX caches
+        run: |
+          python scripts/fetch_datasets.py \
+            --assets-dir ucm-assets \
+            --manifest packaging/assets-manifest.json \
+            --source auto \
+            --evalscope-bin "$(command -v evalscope)" \
+            --include-agentx --move-caches
+          df -h /
+      - name: Manifest + verify
+        run: |
+          rm -rf ucm-assets/.fetch-work
+          python scripts/prepare_assets.py --assets-dir ucm-assets --output ucm-assets/manifest.json
+          python scripts/prepare_assets.py --assets-dir ucm-assets --check
+      - name: Pack
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          tar -czf "ucm-assets-${VERSION}.tar.gz" -C ucm-assets .
+          sha256sum "ucm-assets-${VERSION}.tar.gz" > "ucm-assets-${VERSION}.tar.gz.sha256"
+          ls -lh ucm-assets-*.tar.gz*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asset-pack
+          path: ucm-assets-*.tar.gz*
           if-no-files-found: error
 
   docker-images:
@@ -263,6 +312,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve image name (GHCR 需小写)
+        id: img
+        run: echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/ucm-accept" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -276,13 +328,13 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: false
           load: true
-          tags: ghcr.io/ucm-system/ucm-accept:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
+          tags: ${{ steps.img.outputs.image }}:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
           build-args: |
             INSTALL_AGENTX=0
           provenance: false
       - name: Push native image and save tar
         run: |
-          IMAGE=ghcr.io/ucm-system/ucm-accept:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
+          IMAGE="${{ steps.img.outputs.image }}:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}"
           docker push "${IMAGE}"
           docker run --rm "${IMAGE}" --version
           docker run --rm "${IMAGE}" --mock --fast --item perf --outputs /tmp/docker-smoke
@@ -303,6 +355,9 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Resolve image name (GHCR 需小写)
+        id: img
+        run: echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/ucm-accept" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -312,7 +367,7 @@ jobs:
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          IMAGE=ghcr.io/ucm-system/ucm-accept
+          IMAGE="${{ steps.img.outputs.image }}"
           docker manifest create "${IMAGE}:${VERSION}" \
             --amend "${IMAGE}:${VERSION}-amd64" \
             --amend "${IMAGE}:${VERSION}-arm64"
@@ -333,6 +388,7 @@ jobs:
       - linux-packages
       - windows-exe
       - offline-wheelhouse
+      - asset-pack
       - docker-images
       - docker-manifest
     permissions:
@@ -344,6 +400,11 @@ jobs:
         with:
           name: python-dist
           path: release-assets/python-dist
+      - name: Download asset pack
+        uses: actions/download-artifact@v4
+        with:
+          name: asset-pack
+          path: release-assets/asset-pack
       - name: Download Linux amd64
         uses: actions/download-artifact@v4
         with:
@@ -359,8 +420,9 @@ jobs:
       - name: Download Windows exe
         uses: actions/download-artifact@v4
         with:
-          name: windows-x64-exe
-          path: release-assets/windows-x64
+          pattern: windows-*-exe
+          merge-multiple: true
+          path: release-assets/windows
       - name: Download offline tooling amd64
         uses: actions/download-artifact@v4
         with:
@@ -390,11 +452,21 @@ jobs:
           mv /tmp/ucm-SHA256SUMS SHA256SUMS
           head -20 SHA256SUMS
           du -sh .
+      - name: Generate release notes (按 OS 徽标下载表)
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/ucm-accept"
+          python scripts/gen_release_notes.py \
+            --tag "v${{ needs.prepare.outputs.version }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --image "$IMAGE" \
+            --output notes.md
+          cat notes.md
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.prepare.outputs.version }}
           target_commitish: ${{ github.sha }}
+          body_path: notes.md
           generate_release_notes: true
           fail_on_unmatched_files: false
           files: |
@@ -403,4 +475,5 @@ jobs:
             release-assets/**/*.deb
             release-assets/**/*.rpm
             release-assets/**/*.zip
+            release-assets/**/*.sha256
             release-assets/SHA256SUMS

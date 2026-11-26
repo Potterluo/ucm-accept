@@ -22,14 +22,14 @@ pip install -e ".[gui,build]"
 Stop-OnExit
 
 if ($Arch -eq "arm64") {
-    # cryptography 46.0.3 是最后一个提供 Windows ARM64 轮子的版本（abi3，兼容 py3.11+）；
-    # 预装以满足 modelscope 链的 cryptography>=41，避免 pip 落到无轮子的新版本走源码编译。
-    pip install "cryptography==46.0.3"
+    # pyarrow 从未发布 win_arm64 轮子 → datasets→pyarrow 链在 ARM64 Windows 上无法安装，
+    # evalscope 引擎不可用。ARM64 版打包 mock 版（流程/报告完整，内置假端点演示）；
+    # 真实验收请使用 Windows x64 或 Linux 版本。
+    Write-Host "ARM64 Windows: 打包 mock 版（evalscope 因 pyarrow 缺 win_arm64 轮子而不可用）"
+} else {
+    pip install "evalscope[perf,service]==1.15.0"
     Stop-OnExit
 }
-
-pip install "evalscope[perf,service]==1.15.0"
-Stop-OnExit
 
 pyinstaller --noconfirm --clean packaging/ucm-accept.spec
 Stop-OnExit

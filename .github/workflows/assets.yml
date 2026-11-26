@@ -64,7 +64,7 @@ jobs:
             --source "${{ inputs.source || 'auto' }}" \
             --tokenizer-repo "$UCM_TOKENIZER" \
             --datasets "${{ inputs.datasets }}" \
-            --evalscope-bin "$PWD/.venv/bin/evalscope" \
+            --evalscope-bin "$(command -v evalscope)" \
             ${{ inputs.include_agentx && '--include-agentx' || '' }}
       - name: Manifest + verify
         run: |

@@ -21,6 +21,10 @@ function Stop-OnExit {
 pip install -e ".[gui,build]"
 Stop-OnExit
 
+# bfcl-eval 依赖链会拉入过时的 pathlib backport，PyInstaller 拒绝与其共存
+pip uninstall -y pathlib
+if ($LASTEXITCODE -gt 2) { Stop-OnExit }
+
 if ($Arch -eq "arm64") {
     # pyarrow 从未发布 win_arm64 轮子 → datasets→pyarrow 链在 ARM64 Windows 上无法安装，
     # evalscope 引擎不可用。ARM64 版打包 mock 版（流程/报告完整，内置假端点演示）；

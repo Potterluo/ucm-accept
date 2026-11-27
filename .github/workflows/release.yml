@@ -223,6 +223,8 @@ jobs:
           find offline/wheelhouse -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 \
             | xargs -0 -r -n1 python -m pip wheel --no-deps --wheel-dir offline/wheelhouse
           find offline/wheelhouse -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -delete
+          # bfcl-eval 依赖链的 pathlib 是过时 backport（py3.11 stdlib 冲突），不进离线包
+          find offline/wheelhouse -maxdepth 1 -type f -iname 'pathlib*' -delete
           pip wheel --no-deps -w offline/wheelhouse .
       - name: Validate offline install
         run: |

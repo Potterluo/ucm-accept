@@ -16,6 +16,8 @@ if ! command -v nfpm >/dev/null 2>&1; then
   exit 1
 fi
 
+# bfcl-eval 依赖链会拉入过时的 pathlib backport，PyInstaller 拒绝与其共存
+pip uninstall -y pathlib 2>/dev/null || true
 pyinstaller --noconfirm --clean packaging/ucm-accept.spec
 rm -rf "dist/ucm-accept-linux-${ARCH}"
 mv dist/ucm-accept "dist/ucm-accept-linux-${ARCH}"

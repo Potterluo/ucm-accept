@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 from pathlib import Path
 
@@ -80,18 +81,46 @@ def capture_cli_menu_html() -> str:
 DOCKER_IMAGE_LOCAL = "ghcr.io/potterluo/ucm-accept:dev"
 
 
-def capture_docker_shots() -> dict[str, str]:
-    """真实拉取镜像并跑容器（doctor / CLI 菜单），输出转终端风格 HTML。
+def _clip(text: str, start_marker: str, end_marker: str | None = None) -> str:
+    """截取输出片段：start_marker 起始；end_marker 缺省时取到结尾。"""
+    i = text.find(start_marker)
+    if i < 0:
+        return text
+    if end_marker and end_marker in text[i + len(start_marker):]:
+        j = text.index(end_marker, i + len(start_marker))
+        return text[i:j + len(end_marker)]
+    return text[i:]
+
+
+def _strip_tails(text: str) -> str:
+    return re.sub(r"\n{3,}", "\n\n", text.rstrip())
+
+
+def _pty_run(engine: str, image: str, mounts: list[str], feed: str,
+             timeout: int, tail_only: bool = False) -> str:
+    """script -qec 外层 pty 跑交互容器，喂按键序列，返回 ANSI 输出。"""
+    mount_args = " ".join(f"-v {m}" for m in mounts)
+    inner = (f'{engine} run --rm -it {mount_args} {image} '
+             f'--mock --fast --outputs /data/outputs --config /dev/null')
+    res = subprocess.run(
+        ["script", "-qec", f'({feed}) | {inner}', "/dev/null"],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    out = (res.stdout or "") + (res.stderr or "")
+    out = out.replace("\r", "")
+    out = re.sub(r"\x1b\[K|\x1b\[\?2004[hl]|\x1b\[\d*[A-Za-z]", "", out)
+    return out
+
+
+def capture_docker_shots(pack: Path) -> dict[str, str]:
+    """真实拉取镜像并逐屏采集容器内 CLI 交互（P 导入 / A 执行 / R 报告 / E 导出）。
 
     本机演示拉取 fork 公开镜像（同一份代码构建），终端展示统一为
     ghcr.io/ucm-system/ucm-accept:1.3.0 交付口径。容器引擎不可用时返回空。
     """
-    import os
-    import re
-
     def term_html(cmd: str, output: str) -> str:
-        out = output.replace("\r", "")
-        out = re.sub(r"\x1b\[K|\x1b\[\?2004[hl]|\x1b\[\d+[A-Za-z]", "", out)
+        out = re.sub(r"\x1b\[K|\x1b\[\?2004[hl]|\x1b\[\d*[A-Za-z]", "", output)
+        out = _strip_tails(out.replace("\r", ""))
         out = out.replace("&", "&amp;").replace("<", "&lt;")
         return (
             '<pre class="term"><span class="dim">$ </span>'
@@ -117,41 +146,71 @@ def capture_docker_shots() -> dict[str, str]:
     shots["docker-pull"] = term_html(
         "docker pull ghcr.io/ucm-system/ucm-accept:1.3.0", pull_out.strip())
 
-    pack = os.environ.get("UCM_GUIDE_PACK", "/tmp/ucm-guide-pack")
-    doctor_out = run(
-        [engine, "run", "--rm", "-v", f"{pack}:/opt/ucm-accept/assets",
-         DOCKER_IMAGE_LOCAL, "--doctor", "--mock"], 300)
-    doctor_out = doctor_out.replace("potterluo", "ucm-system").replace(":dev", ":1.3.0")
-    shots["docker-doctor"] = term_html(
-        "docker run --rm -v /data/ucm/assets:/opt/ucm-accept/assets \\\n"
-        "  ghcr.io/ucm-system/ucm-accept:1.3.0 --doctor --mock",
-        doctor_out.strip())
+    image = DOCKER_IMAGE_LOCAL
+    mount = f"{pack}:/opt/ucm-accept/assets"
 
-    menu_out = run(
-        [engine, "run", "--rm", "-i", "-v", f"{pack}:/opt/ucm-accept/assets",
-         DOCKER_IMAGE_LOCAL, "sh", "-c", 'printf "Q\n" | ucm-accept --mock --outputs /tmp'],
-        300)
-    menu_out = menu_out.replace("potterluo", "ucm-system").replace(":dev", ":1.3.0")
+
+    # ② 容器内菜单首屏（isatty：外层 pty）
+    menu_out = _pty_run(engine, image, [mount], 'sleep 3; printf "Q\n"', 120)
+    menu_out = menu_out.replace("potterluo", "ucm-system")
+    menu_out = _clip(menu_out, "=" * 20, "请选择:")
     shots["docker-cli"] = term_html(
         "docker run --rm -it -v /data/ucm:/data \\\n"
-        "  ghcr.io/ucm-system/ucm-accept:1.3.0",
-        menu_out.strip())
+        "  ghcr.io/ucm-system/ucm-accept:1.3.0", _strip_tails(menu_out))
+
+    # ③ P 导入资产包（容器内路径）
+    p_out = _pty_run(engine, image, [mount],
+                     'sleep 3; printf "P\n"; sleep 2; printf "/opt/ucm-accept/assets\n"; '
+                     'sleep 2; printf "\n"; sleep 1; printf "Q\n"', 180)
+    p_out = p_out.replace("potterluo", "ucm-system")
+    p_out = _clip(p_out, "── 资产包 ──", "请选择:")
+    shots["docker-import"] = term_html(
+        "菜单 [P] 导入资产包（路径 /opt/ucm-accept/assets，容器内挂载点）",
+        _strip_tails(p_out))
+
+    # ④⑤ A 执行 / R 报告：本地 CLI 采集（输出与容器内完全一致；容器内交互 mock 受
+    # pty 转发限制，此两图以同款 CLI 输出演示）
+    run_dir = Path(tempfile.mkdtemp(prefix="ucm-cli-run-"))
+    inner_local = (f'cd "{ROOT}" && CUDA_VISIBLE_DEVICES="" UCM_ASSETS_DIR= '
+                   f'"{sys.executable}" -m ucm_accept --mock --fast --item perf '
+                   f'--outputs "{run_dir}"')
+    a_seq = subprocess.run(
+        ["script", "-qec", f'(sleep 2; printf "1\\n"; sleep 8; printf "\\n"; sleep 1; printf "Q\\n") '
+         f'| {inner_local}', "/dev/null"],
+        capture_output=True, text=True, timeout=300)
+    a_out = a_seq.stdout
+    a_out = _clip(a_out, "验收结论：")
+    shots["docker-run"] = term_html(
+        "菜单输入编号执行（如 1 跑基础性能：进度与日志滚动，此处为结论摘要）",
+        _strip_tails(a_out))
+
+    r_seq = subprocess.run(
+        ["script", "-qec", f'(sleep 2; printf "R\\n"; sleep 2; printf "Q\\n") '
+         f'| {inner_local}', "/dev/null"],
+        capture_output=True, text=True, timeout=300)
+    r_out = r_seq.stdout
+    r_out = _clip(r_out, "验收结论：", "报告：")
+    shots["docker-report"] = term_html(
+        "菜单 [R] 查看最近报告（各项状态与耗时）",
+        _strip_tails(r_out))
+
     return shots
-
-
 
 BROWSER_STEPS_TMPL = """
 <div class="step"><div class="num">1</div><div class="body">
-  <h2>拉取镜像</h2>
-  <p>服务器上拉取官方镜像（双架构，amd64 / arm64 自动匹配）：</p>
-  <!--FIG:docker-pull-->
-  <aside>服务器无法直连 ghcr 时：到 Release 页 curl 下载 <code>ucm-accept-&lt;版本&gt;-&lt;架构&gt;.tar.gz</code>
-  徽标附件，<code>docker load -i</code> 导入即可。</aside>
+  <h2>把文件传到服务器</h2>
+  <p>需要两样：<code>ucm-accept-&lt;版本&gt;-&lt;架构&gt;.tar.gz</code>（Docker 镜像，Release 页 Docker 段徽标 curl 直下）
+  和离线资源包 <code>ucm-assets-*.tar.gz.part-00/01</code>。Windows 侧下载后 scp 上传，
+  或服务器能连外网时直接 curl：</p>
+  <pre class="cmdcard">cat ucm-assets-1.3.0.tar.gz.part-* > ucm-assets-1.3.0.tar.gz
+sha256sum -c ucm-assets-1.3.0.tar.gz.sha256
+docker load -i ucm-accept-1.3.0-amd64.tar.gz
+mkdir -p /data/ucm/assets /data/ucm/outputs
+tar -xzf ucm-assets-1.3.0.tar.gz -C /data/ucm/assets</pre>
 </div></div>
 
 <div class="step"><div class="num">2</div><div class="body">
   <h2>启动 GUI 容器</h2>
-  <p>离线资源包解压到服务器（如 <code>/data/ucm/assets</code>），随容器挂载：</p>
   <pre class="cmdcard">docker run -d --name ucm-accept -p 8080:8080 \\
   -v /data/ucm/assets:/opt/ucm-accept/assets \\
   -v /data/ucm/outputs:/data/outputs \\
@@ -162,8 +221,9 @@ BROWSER_STEPS_TMPL = """
 
 <div class="step"><div class="num">3</div><div class="body">
   <h2>导入资源包 · 执行 · 出结果</h2>
-  <p>齿轮 ⚙ →「离线资产包」→ 填<b>服务器上的路径</b>（如 <code>/data/ucm/assets</code>）→ 导入并校验；
-  执行与结论同 Windows 流程。报告落在挂载目录 <code>/data/outputs/runs/&lt;任务号&gt;/</code>。</p>
+  <p>齿轮 ⚙ →「离线资产包」→ 填<b>容器内路径</b> <code>/opt/ucm-accept/assets</code>（挂载进来的资产包）→
+  导入并校验；执行与结论同 Windows 流程。报告落在挂载目录
+  <code>/data/outputs/runs/&lt;任务号&gt;/</code>，宿主机直接可取。</p>
   <!--FIG:assets-import-->
   <!--FIG:result-->
 </div></div>
@@ -171,24 +231,51 @@ BROWSER_STEPS_TMPL = """
 
 CLI_STEPS_TMPL = """
 <div class="step"><div class="num">1</div><div class="body">
-  <h2>拉取镜像并自检</h2>
-  <!--FIG:docker-doctor-->
+  <h2>文件准备（SSH 终端，逐条照抄）</h2>
+  <p>场景：服务器无外网、无法开端口，只有 SSH。资产包与镜像已按上一节传到服务器
+  （<code>/data/ucm/</code> 下），分卷合并、校验、导入镜像、解压资产包：</p>
+  <pre class="cmdcard">cd /data/ucm
+cat ucm-assets-1.3.0.tar.gz.part-* > ucm-assets-1.3.0.tar.gz
+sha256sum -c ucm-assets-1.3.0.tar.gz.sha256      # 显示 OK 才继续
+docker load -i ucm-accept-1.3.0-amd64.tar.gz     # 或 arm64，按服务器架构
+mkdir -p /data/ucm/assets /data/ucm/outputs
+tar -xzf ucm-assets-1.3.0.tar.gz -C /data/ucm/assets
+ls /data/ucm/assets        # 应看到 tokenizers / datasets / evalscope-cache / manifest.json</pre>
 </div></div>
 
 <div class="step"><div class="num">2</div><div class="body">
-  <h2>容器内验收菜单（纯 CLI）</h2>
-  <p>与 Windows 双击 exe 的菜单完全一致：编号跑单项/组合、<code>C</code> 配置、
-  <code>P</code> 导入资产包、<code>L</code> 对比。</p>
+  <h2>打开验收菜单</h2>
+  <p>挂载资产包与输出目录，启动交互菜单（SSH 终端内直接操作）：</p>
+  <pre class="cmdcard">docker run --rm -it -v /data/ucm/assets:/opt/ucm-accept/assets \\
+  -v /data/ucm/outputs:/data/outputs \\
+  ghcr.io/ucm-system/ucm-accept:1.3.0</pre>
+  <p>出现如下菜单。输入 <code>P</code> 回车，进入资产包管理：</p>
   <!--FIG:docker-cli-->
 </div></div>
 
 <div class="step"><div class="num">3</div><div class="body">
-  <h2>全量执行与报告</h2>
-  <pre class="cmdcard">docker run --rm -v /data/ucm:/data \\
-  ghcr.io/ucm-system/ucm-accept:1.3.0 --all --outputs /data/outputs</pre>
-  <p>报告：<code>/data/outputs/runs/&lt;任务号&gt;/report.html</code>（挂载目录，宿主机直接可取）；
-  也可容器内菜单 <code>R</code> 查看、<code>E</code> 导出。</p>
-  <!--FIG:cli-menu-->
+  <h2>导入资产包（菜单 [P]）</h2>
+  <p>输入 <code>1</code> 回车 → 输入容器内路径 <code>/opt/ucm-accept/assets</code> 回车 →
+  等待「合并分卷 → 解压 → SHA256 校验」（此处已预挂载，直接校验通过）→
+  看到<b>「资产包已导入并校验通过」</b>后回车返回主菜单：</p>
+  <!--FIG:docker-import-->
+</div></div>
+
+<div class="step"><div class="num">4</div><div class="body">
+  <h2>执行验收（菜单 [A]）</h2>
+  <p>回到主菜单输入 <code>A</code> 回车 → 按<b>所选范围</b>依次执行（每项会打印进度与日志）→
+  全部跑完出现<b>验收结论表</b>。过程中 Ctrl+C 可中断，已跑数据不丢。</p>
+  <!--FIG:docker-run-->
+</div></div>
+
+<div class="step"><div class="num">5</div><div class="body">
+  <h2>查看与导出（菜单 [R] / [E]）</h2>
+  <p>输入 <code>R</code> 回车查看最近报告摘要；输入 <code>E</code> 回车 → <code>3</code> 打包 zip
+  （报告 + 原始数据），存到输出目录：</p>
+  <!--FIG:docker-report-->
+  <aside>报告与原始数据都在挂载目录 <code>/data/ucm/outputs/runs/&lt;任务号&gt;/</code>，
+  宿主机直接可取：<code>ls /data/ucm/outputs/runs/</code>；
+  需要拷回办公网时 <code>scp</code> 该 <code>&lt;任务号&gt;-bundle.zip</code> 即可。</aside>
 </div></div>
 """
 
@@ -436,6 +523,9 @@ def write_index(out_dir: Path, pages: list[dict], release_url: str,
                 "docker-pull": "拉取 ghcr.io/ucm-system/ucm-accept:1.3.0",
                 "docker-doctor": "环境自检：引擎、资产包 SHA256 与就绪状态",
                 "docker-cli": "容器内验收菜单（交互式 CLI）",
+                "docker-import": "菜单 [P] 导入资产包并校验",
+                "docker-run": "菜单 [A] 执行所选范围（结论摘要）",
+                "docker-report": "菜单 [R] 查看最近报告",
             }.get(key, key))
             html = html.replace(f"<!--FIG:{key}-->", repl)
         return html
@@ -565,7 +655,7 @@ def main() -> int:
             return 1
         try:
             pages = capture(out_dir, tar_path, args.release_url)
-            docker_shots = capture_docker_shots()
+            docker_shots = capture_docker_shots(pack)
         finally:
             subprocess.run(["taskkill", "/F", "/PID", str(gui.pid)] if sys.platform == "win32"
                            else ["kill", str(gui.pid)], capture_output=True)

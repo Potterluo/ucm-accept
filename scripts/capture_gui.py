@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import argparse
 import http.client
+import os
+import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -73,6 +76,120 @@ def capture_cli_menu_html() -> str:
     tail = text[cursor:]
     rendered += (f'<span style="color:{color}">{esc(tail)}</span>' if color else esc(tail))
     return rendered
+
+DOCKER_IMAGE_LOCAL = "ghcr.io/potterluo/ucm-accept:dev"
+
+
+def capture_docker_shots() -> dict[str, str]:
+    """真实拉取镜像并跑容器（doctor / CLI 菜单），输出转终端风格 HTML。
+
+    本机演示拉取 fork 公开镜像（同一份代码构建），终端展示统一为
+    ghcr.io/ucm-system/ucm-accept:1.3.0 交付口径。容器引擎不可用时返回空。
+    """
+    import os
+    import re
+
+    def term_html(cmd: str, output: str) -> str:
+        out = output.replace("\r", "")
+        out = re.sub(r"\x1b\[K|\x1b\[\?2004[hl]|\x1b\[\d+[A-Za-z]", "", out)
+        out = out.replace("&", "&amp;").replace("<", "&lt;")
+        return (
+            '<pre class="term"><span class="dim">$ </span>'
+            f'<span class="cmd">{cmd}</span>\n{out}</pre>'
+        )
+
+    def run(cmd: list[str], timeout: int) -> str:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return (res.stdout or "") + (res.stderr or "")
+
+    shots: dict[str, str] = {}
+    engine = shutil.which("podman") or shutil.which("docker")
+    if not engine:
+        print("  无容器引擎，Docker 终端截图跳过", flush=True)
+        return shots
+
+    print(f"  {engine} pull 镜像（首次约几百 MB）…", flush=True)
+    pull_out = run([engine, "pull", DOCKER_IMAGE_LOCAL], 900)
+    if "error" in pull_out.lower() or "denied" in pull_out.lower():
+        print(f"  镜像拉取失败，跳过 Docker 终端截图：{pull_out[:200]}", flush=True)
+        return shots
+    pull_out = pull_out.replace("potterluo", "ucm-system").replace(":dev", ":1.3.0")
+    shots["docker-pull"] = term_html(
+        "docker pull ghcr.io/ucm-system/ucm-accept:1.3.0", pull_out.strip())
+
+    pack = os.environ.get("UCM_GUIDE_PACK", "/tmp/ucm-guide-pack")
+    doctor_out = run(
+        [engine, "run", "--rm", "-v", f"{pack}:/opt/ucm-accept/assets",
+         DOCKER_IMAGE_LOCAL, "--doctor", "--mock"], 300)
+    doctor_out = doctor_out.replace("potterluo", "ucm-system").replace(":dev", ":1.3.0")
+    shots["docker-doctor"] = term_html(
+        "docker run --rm -v /data/ucm/assets:/opt/ucm-accept/assets \\\n"
+        "  ghcr.io/ucm-system/ucm-accept:1.3.0 --doctor --mock",
+        doctor_out.strip())
+
+    menu_out = run(
+        [engine, "run", "--rm", "-i", "-v", f"{pack}:/opt/ucm-accept/assets",
+         DOCKER_IMAGE_LOCAL, "sh", "-c", 'printf "Q\n" | ucm-accept --mock --outputs /tmp'],
+        300)
+    menu_out = menu_out.replace("potterluo", "ucm-system").replace(":dev", ":1.3.0")
+    shots["docker-cli"] = term_html(
+        "docker run --rm -it -v /data/ucm:/data \\\n"
+        "  ghcr.io/ucm-system/ucm-accept:1.3.0",
+        menu_out.strip())
+    return shots
+
+
+
+BROWSER_STEPS_TMPL = """
+<div class="step"><div class="num">1</div><div class="body">
+  <h2>拉取镜像</h2>
+  <p>服务器上拉取官方镜像（双架构，amd64 / arm64 自动匹配）：</p>
+  <!--FIG:docker-pull-->
+</div></div>
+
+<div class="step"><div class="num">2</div><div class="body">
+  <h2>启动 GUI 容器</h2>
+  <p>离线资源包解压到服务器（如 <code>/data/ucm/assets</code>），随容器挂载：</p>
+  <pre class="cmdcard">docker run -d --name ucm-accept -p 8080:8080 \\
+  -v /data/ucm/assets:/opt/ucm-accept/assets \\
+  -v /data/ucm/outputs:/data/outputs \\
+  ghcr.io/ucm-system/ucm-accept:1.3.0 --gui --host 0.0.0.0 --port 8080</pre>
+  <p>浏览器访问 <code>http://&lt;服务器IP&gt;:8080</code>——之后的操作与 Windows 版完全一致：</p>
+  <!--FIG:home-->
+</div></div>
+
+<div class="step"><div class="num">3</div><div class="body">
+  <h2>导入资源包 · 执行 · 出结果</h2>
+  <p>齿轮 ⚙ →「离线资产包」→ 填<b>服务器上的路径</b>（如 <code>/data/ucm/assets</code>）→ 导入并校验；
+  执行与结论同 Windows 流程。报告落在挂载目录 <code>/data/outputs/runs/&lt;任务号&gt;/</code>。</p>
+  <!--FIG:assets-import-->
+  <!--FIG:result-->
+</div></div>
+"""
+
+CLI_STEPS_TMPL = """
+<div class="step"><div class="num">1</div><div class="body">
+  <h2>拉取镜像并自检</h2>
+  <!--FIG:docker-doctor-->
+</div></div>
+
+<div class="step"><div class="num">2</div><div class="body">
+  <h2>容器内验收菜单（纯 CLI）</h2>
+  <p>与 Windows 双击 exe 的菜单完全一致：编号跑单项/组合、<code>C</code> 配置、
+  <code>P</code> 导入资产包、<code>L</code> 对比。</p>
+  <!--FIG:docker-cli-->
+</div></div>
+
+<div class="step"><div class="num">3</div><div class="body">
+  <h2>全量执行与报告</h2>
+  <pre class="cmdcard">docker run --rm -v /data/ucm:/data \\
+  ghcr.io/ucm-system/ucm-accept:1.3.0 --all --outputs /data/outputs</pre>
+  <p>报告：<code>/data/outputs/runs/&lt;任务号&gt;/report.html</code>（挂载目录，宿主机直接可取）；
+  也可容器内菜单 <code>R</code> 查看、<code>E</code> 导出。</p>
+  <!--FIG:cli-menu-->
+</div></div>
+"""
+
 
 def prepare_guide_pack(out_dir: Path) -> tuple[Path, Path]:
     """生成演示用真实资产包（含 manifest）及其 tar.gz，返回 (pack_root, tar_path)。"""
@@ -219,7 +336,8 @@ def capture(out_dir: Path, tar_path: Path, release_url: str) -> list[dict]:
     return pages
 
 
-def write_index(out_dir: Path, pages: list[dict], release_url: str) -> None:
+def write_index(out_dir: Path, pages: list[dict], release_url: str,
+                docker_shots: dict[str, str] | None = None) -> None:
     by_file = {p["file"]: p["caption"] for p in pages}
 
     def has(name: str) -> bool:
@@ -296,7 +414,35 @@ def write_index(out_dir: Path, pages: list[dict], release_url: str) -> None:
   {fig("compare-report")}
 </div></div>
 """
-    steps_html = f'<section id="steps">{steps_html}</section>' if has("home") else ""
+    docker_shots = docker_shots or {}
+
+    def term_fig(key: str, caption: str) -> str:
+        if key not in docker_shots:
+            return ""
+        return (f'<figure><div class="termwrap">{docker_shots[key]}</div>'
+                f"<figcaption>{caption}</figcaption></figure>")
+
+    def fill(tmpl: str) -> str:
+        html = tmpl
+        for key in set(docker_shots) | set(re.findall(r"<!--FIG:([a-z-]+)-->", html)):
+            repl = fig(key) if not key.startswith("docker") else term_fig(key, {
+                "docker-pull": "拉取 ghcr.io/ucm-system/ucm-accept:1.3.0",
+                "docker-doctor": "环境自检：引擎、资产包 SHA256 与就绪状态",
+                "docker-cli": "容器内验收菜单（交互式 CLI）",
+            }.get(key, key))
+            html = html.replace(f"<!--FIG:{key}-->", repl)
+        return html
+
+    steps_html = (
+        '<div class="modes">'
+        '<button class="mode-btn active" data-mode="win">Windows 纯界面</button>'
+        '<button class="mode-btn" data-mode="browser">服务器 Docker + 浏览器</button>'
+        '<button class="mode-btn" data-mode="cli">服务器 Docker 纯 CLI</button>'
+        '</div>'
+        f'<section id="mode-win">{steps_html}</section>'
+        f'<section id="mode-browser" hidden>{fill(BROWSER_STEPS_TMPL)}</section>'
+        f'<section id="mode-cli" hidden>{fill(CLI_STEPS_TMPL)}</section>'
+    )
 
     (out_dir / "index.html").write_text(
         f"""<!DOCTYPE html>
@@ -339,6 +485,19 @@ def write_index(out_dir: Path, pages: list[dict], release_url: str) -> None:
             box-shadow:0 4px 12px rgba(0,0,0,.05) }}
   figure img {{ width:100%; display:block }}
   figcaption {{ padding:11px 18px; font-size:12.5px; color:var(--muted); border-top:1px solid var(--line) }}
+  .modes {{ display:flex; background:#e8e8ed; border-radius:12px; padding:3px;
+            width:fit-content; margin:36px auto 8px }}
+  .mode-btn {{ border:0; background:transparent; padding:9px 22px; border-radius:10px;
+              font-size:13.5px; font-weight:600; color:var(--muted); cursor:pointer }}
+  .mode-btn.active {{ background:#fff; color:var(--ink); box-shadow:0 1px 4px rgba(0,0,0,.12) }}
+  pre.cmdcard {{ background:#1d1d1f; color:#e6edf3; border-radius:12px; padding:14px 18px;
+                 font-family:"SF Mono",ui-monospace,Consolas,monospace; font-size:12.5px;
+                 line-height:1.5; overflow-x:auto }}
+  .termwrap {{ background:#0d1117; padding:10px 14px }}
+  pre.term {{ margin:0; background:#0d1117; color:#c9d1d9; font-family:"SF Mono",ui-monospace,Consolas,monospace;
+              font-size:12px; line-height:1.5; white-space:pre-wrap }}
+  pre.term .dim {{ color:#8b949e }}
+  pre.term .cmd {{ color:#79c0ff }}
   footer {{ text-align:center; color:var(--muted); font-size:12px; padding:26px 16px 40px }}
 </style>
 </head>
@@ -377,6 +536,7 @@ def main() -> int:
 
     print("准备演示资产包…", flush=True)
     pack, tar_path = prepare_guide_pack(out_dir)
+    os.environ["UCM_GUIDE_PACK"] = str(pack)
 
     gui = subprocess.Popen(
         [sys.executable, "-m", "ucm_accept", "--gui", "--mock", "--no-browser",
@@ -390,13 +550,14 @@ def main() -> int:
             return 1
         try:
             pages = capture(out_dir, tar_path, args.release_url)
+            docker_shots = capture_docker_shots()
         finally:
             subprocess.run(["taskkill", "/F", "/PID", str(gui.pid)] if sys.platform == "win32"
                            else ["kill", str(gui.pid)], capture_output=True)
     finally:
         if gui.poll() is None:
             gui.terminate()
-    write_index(out_dir, pages, args.release_url)
+    write_index(out_dir, pages, args.release_url, docker_shots)
     print(f"站点已生成：{out_dir}")
     return 0
 

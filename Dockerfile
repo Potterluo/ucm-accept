@@ -8,7 +8,7 @@ ENV PIP_NO_CACHE_DIR=1 \
     VIRTUAL_ENV=/opt/venv
 
 WORKDIR /build
-RUN apt-get update && apt-get install -y --no-install-recommends gcc \
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
@@ -19,9 +19,9 @@ COPY wheelhouse ./wheelhouse
 
 RUN if [ "${OFFLINE}" = "1" ]; then \
       pip install --no-index --find-links=/build/wheelhouse setuptools wheel; \
-      pip install --no-build-isolation --no-index --find-links=/build/wheelhouse /build "evalscope[perf,eval,bfcl,agentx]==1.15.0"; \
+      pip install --no-build-isolation --no-index --find-links=/build/wheelhouse /build "evalscope[perf,eval,bfcl,agentx]==1.15.0" "pyarrow==21.0.0"; \
     else \
-      pip install /build "evalscope[perf,eval,bfcl,agentx]==1.15.0"; \
+      pip install /build "evalscope[perf,eval,bfcl,agentx]==1.15.0" "pyarrow==21.0.0"; \
     fi
 
 FROM python:${PYTHON_VERSION}-slim-bookworm

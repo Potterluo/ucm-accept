@@ -67,7 +67,7 @@ jobs:
       - name: Build (linux)
         if: matrix.platform == 'linux'
         run: |
-          pip install -e ".[gui,build]" "evalscope[perf,eval,bfcl,agentx]==1.15.0"
+          pip install -e ".[gui,build]" "evalscope[perf,eval,bfcl,agentx]==1.15.0" "pyarrow==21.0.0"
           VERSION="${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}"
           ./scripts/build_linux.sh "${VERSION#v}" ${{ matrix.arch }}
       - name: Upload (windows)

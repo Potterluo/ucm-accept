@@ -287,7 +287,7 @@ def capture(out_dir: Path, tar_path: Path, release_url: str) -> list[dict]:
         # 9. CLI 验收菜单（终端风格模拟：真实 ANSI 输出渲染）
         cli_html = capture_cli_menu_html()
         term = f"""<!DOCTYPE html><html><body style="margin:0;background:#0d1117">
-<div style="max-width:880px;margin:24px auto;background:#161b22;border-radius:12px;overflow:hidden;
+<div id="term-window" style="max-width:880px;margin:24px auto;background:#161b22;border-radius:12px;overflow:hidden;
      box-shadow:0 8px 24px rgba(0,0,0,.4)">
 <div style="background:#21262d;padding:10px 14px;display:flex;gap:8px">
   <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57"></span>
@@ -300,7 +300,12 @@ def capture(out_dir: Path, tar_path: Path, release_url: str) -> list[dict]:
 </div></body></html>"""
         page.set_content(term)
         page.wait_for_timeout(400)
-        shot("cli-menu", "⑨ 也可以不进 GUI——双击 exe 直接在验收菜单里完成全部操作（输入 G 随时切浏览器 GUI）")
+        # 元素级截图：紧贴终端窗口，避免视口大片空白
+        path = shots_dir / "cli-menu.png"
+        page.locator("#term-window").screenshot(path=str(path))
+        pages.append({"file": "screenshots/cli-menu.png",
+                      "caption": "⑨ 也可以不进 GUI——双击 exe 直接在验收菜单里完成全部操作（输入 G 随时切浏览器 GUI）"})
+        print("  截图 cli-menu", flush=True)
 
         # 10. 结果对比：CLI 跑第二次（共享输出目录）→ 对比面板选两个结果 → 生成
         subprocess.run(
@@ -442,6 +447,14 @@ def write_index(out_dir: Path, pages: list[dict], release_url: str,
         f'<section id="mode-win">{steps_html}</section>'
         f'<section id="mode-browser" hidden>{fill(BROWSER_STEPS_TMPL)}</section>'
         f'<section id="mode-cli" hidden>{fill(CLI_STEPS_TMPL)}</section>'
+        '<script>'
+        'document.querySelectorAll(".mode-btn").forEach(function(btn){'
+        'btn.addEventListener("click", function(){'
+        'document.querySelectorAll(".mode-btn").forEach(function(b){b.classList.remove("active")});'
+        'btn.classList.add("active");'
+        'document.querySelectorAll("[id^=mode-]").forEach(function(s){s.hidden = s.id !== "mode-" + btn.dataset.mode});'
+        '});});'
+        '</script>'
     )
 
     (out_dir / "index.html").write_text(

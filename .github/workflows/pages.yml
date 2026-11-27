@@ -30,8 +30,15 @@ jobs:
           pip install -e ".[gui]"
           pip install playwright
           playwright install chromium --with-deps
+      - name: Resolve latest release URL
+        id: release
+        run: |
+          URL=$(gh api repos/${{ github.repository }}/releases/latest --jq '.html_url' 2>/dev/null || true)
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Capture GUI screenshots
-        run: python scripts/capture_gui.py --out site
+        run: python scripts/capture_gui.py --out site --release-url "${{ steps.release.outputs.url }}"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

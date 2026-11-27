@@ -133,15 +133,24 @@ def capture_docker_shots(pack: Path) -> dict[str, str]:
 
     shots: dict[str, str] = {}
     engine = shutil.which("podman") or shutil.which("docker")
+    static_dir = Path(__file__).resolve().parents[1] / "scripts" / "term-shots"
+
+    def load_static() -> dict[str, str]:
+        """CI 无容器引擎/拉取失败时的回退：仓库内置的真实采集片段。"""
+        loaded = {}
+        for f in sorted(static_dir.glob("*.html")):
+            loaded[f.stem] = f.read_text(encoding="utf-8")
+        return loaded
+
     if not engine:
-        print("  无容器引擎，Docker 终端截图跳过", flush=True)
-        return shots
+        print("  无容器引擎，Docker 终端图使用仓库内置片段", flush=True)
+        return load_static()
 
     print(f"  {engine} pull 镜像（首次约几百 MB）…", flush=True)
     pull_out = run([engine, "pull", DOCKER_IMAGE_LOCAL], 900)
     if "error" in pull_out.lower() or "denied" in pull_out.lower():
-        print(f"  镜像拉取失败，跳过 Docker 终端截图：{pull_out[:200]}", flush=True)
-        return shots
+        print(f"  镜像拉取失败，Docker 终端图使用仓库内置片段：{pull_out[:200]}", flush=True)
+        return load_static()
     pull_out = pull_out.replace("potterluo", "ucm-system").replace(":dev", ":1.3.0")
     shots["docker-pull"] = term_html(
         "docker pull ghcr.io/ucm-system/ucm-accept:1.3.0", pull_out.strip())

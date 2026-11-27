@@ -145,6 +145,8 @@ BROWSER_STEPS_TMPL = """
   <h2>拉取镜像</h2>
   <p>服务器上拉取官方镜像（双架构，amd64 / arm64 自动匹配）：</p>
   <!--FIG:docker-pull-->
+  <aside>服务器无法直连 ghcr 时：到 Release 页 curl 下载 <code>ucm-accept-&lt;版本&gt;-&lt;架构&gt;.tar.gz</code>
+  徽标附件，<code>docker load -i</code> 导入即可。</aside>
 </div></div>
 
 <div class="step"><div class="num">2</div><div class="body">

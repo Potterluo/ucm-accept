@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.1 — 2026-11-27
+
+### Fixed
+
+- **产品与引擎能力同步**：所有交付形态（Docker / exe / deb / rpm / 离线 wheelhouse）的
+  EvalScope 安装从 `[perf,service]` 统一升级为 `[perf,eval,bfcl,agentx]==1.15.0`——
+  此前容器/桌面版跑真实精度（BFCL 缺 bfcl 包）与 AgentX（缺 aiperf）会失败
+- **移除已弃用的 gradio**：`[service]` extra 与安装不再引入；doctor 的「GUI 依赖」
+  检查改为 fastapi / uvicorn（GUI 已是 FastAPI 单页前端）
+- Dockerfile 移除 INSTALL_AGENTX 开关（agentx 默认内置于镜像）
+
 ## 1.3.0 — 2026-11-27
 
 ### Added

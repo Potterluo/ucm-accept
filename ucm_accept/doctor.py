@@ -178,10 +178,14 @@ def run_doctor(config: Config, *, probe: bool = False, mock: bool = False) -> li
                 )
             )
 
-    if importlib.util.find_spec("gradio"):
-        results.append(_ok("GUI 依赖", "gradio 已安装"))
+    gui_missing = [name for name in ("fastapi", "uvicorn")
+                   if importlib.util.find_spec(name) is None]
+    if gui_missing:
+        results.append(_warn(
+            "GUI 依赖", "未安装 " + "、".join(gui_missing),
+            "CLI 不受影响；GUI 需 pip install 'ucm-accept[gui]'（gradio 已弃用）"))
     else:
-        results.append(_warn("GUI 依赖", "未安装 gradio", "CLI 不受影响；GUI 需 pip install 'ucm-accept[gui]'"))
+        results.append(_ok("GUI 依赖", "fastapi / uvicorn 已安装"))
 
     results.extend(_asset_hub_checks(config))
 

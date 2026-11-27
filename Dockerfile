@@ -3,7 +3,6 @@ ARG PYTHON_VERSION=3.11
 FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
 
 ARG OFFLINE=0
-ARG INSTALL_AGENTX=0
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     VIRTUAL_ENV=/opt/venv
@@ -18,15 +17,9 @@ COPY wheelhouse ./wheelhouse
 
 RUN if [ "${OFFLINE}" = "1" ]; then \
       pip install --no-index --find-links=/build/wheelhouse setuptools wheel; \
-      pip install --no-build-isolation --no-index --find-links=/build/wheelhouse /build "evalscope[perf,service]==1.15.0"; \
-      if [ "${INSTALL_AGENTX}" = "1" ]; then \
-        pip install --no-build-isolation --no-index --find-links=/build/wheelhouse "evalscope[agentx]==1.15.0"; \
-      fi; \
+      pip install --no-build-isolation --no-index --find-links=/build/wheelhouse /build "evalscope[perf,eval,bfcl,agentx]==1.15.0"; \
     else \
-      pip install /build "evalscope[perf,service]==1.15.0"; \
-      if [ "${INSTALL_AGENTX}" = "1" ]; then \
-        pip install "evalscope[agentx]==1.15.0"; \
-      fi; \
+      pip install /build "evalscope[perf,eval,bfcl,agentx]==1.15.0"; \
     fi
 
 FROM python:${PYTHON_VERSION}-slim-bookworm

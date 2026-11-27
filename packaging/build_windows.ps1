@@ -27,7 +27,7 @@ if ($Arch -eq "arm64") {
     # 真实验收请使用 Windows x64 或 Linux 版本。
     Write-Host "ARM64 Windows: 打包 mock 版（evalscope 因 pyarrow 缺 win_arm64 轮子而不可用）"
 } else {
-    pip install "evalscope[perf,service]==1.15.0"
+    pip install "evalscope[perf,eval,bfcl,agentx]==1.15.0"
     Stop-OnExit
 }
 

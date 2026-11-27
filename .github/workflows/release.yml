@@ -122,7 +122,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends binutils patchelf curl
           python -m pip install --upgrade pip
-          pip install -e ".[gui,build]" "evalscope[perf,service]==1.15.0"
+          pip install -e ".[gui,build]" "evalscope[perf,eval,bfcl,agentx]==1.15.0"
       - name: Install nfpm (${{ matrix.nfpm_arch }})
         run: |
           NFPM_VERSION=2.43.0
@@ -218,7 +218,7 @@ jobs:
           mkdir -p offline/wheelhouse
           python -m pip install --upgrade pip wheel
           pip download --prefer-binary -d offline/wheelhouse \
-            "evalscope[perf,service]==1.15.0" "gradio>=6.0,<7" "PyYAML>=6" "wheel" "setuptools"
+            "evalscope[perf,eval,bfcl,agentx]==1.15.0" "PyYAML>=6" "wheel" "setuptools"
           # 少数包（如 jieba）只发源码包；在构建机先转成 wheel，保证客户现场不用编译器。
           find offline/wheelhouse -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 \
             | xargs -0 -r -n1 python -m pip wheel --no-deps --wheel-dir offline/wheelhouse
@@ -228,7 +228,7 @@ jobs:
         run: |
           python -m venv /tmp/offline-venv
           /tmp/offline-venv/bin/pip install --no-index --find-links offline/wheelhouse \
-            "ucm-accept==${{ needs.prepare.outputs.version }}" "evalscope[perf,service]==1.15.0"
+            "ucm-accept==${{ needs.prepare.outputs.version }}" "evalscope[perf,eval,bfcl,agentx]==1.15.0"
           /tmp/offline-venv/bin/ucm-accept --version
           /tmp/offline-venv/bin/ucm-accept --mock --fast --item perf --outputs /tmp/offline-smoke
       - name: Build tooling bundle
@@ -329,8 +329,6 @@ jobs:
           push: false
           load: true
           tags: ${{ steps.img.outputs.image }}:${{ needs.prepare.outputs.version }}-${{ matrix.arch }}
-          build-args: |
-            INSTALL_AGENTX=0
           provenance: false
       - name: Push native image and save tar
         run: |

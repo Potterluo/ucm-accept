@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.2 — 2026-11-27
+
+### Fixed
+
+- **容器内现场补装开箱可用**：`/opt/venv` 归属 ucm 用户（此前归 root，容器默认用户
+  `pip install` 撞权限）；BFCL 精度现场补装命令无需任何特权参数
+- **bfcl-eval 依赖清单全量钉版本**（`packaging/bfcl-eval-deps.txt`，本地验证组合——
+  `mistralai==1.7.0` 等）：此前未钉版本时新版 mistralai 无 `Mistral` 类导致 BFCL 评测
+  ImportError；离线工具包（wheelhouse）随清单同步
+- **代理环境防护文档**：宿主 `HTTP_PROXY` 会被容器继承并拦截验收请求（502/超时），
+  README 明确容器运行时清除代理变量的方法
+
+### Known Limitations
+
+- BFCL 精度不在镜像/桌面产物内预装（上游 bfcl-eval 依赖链与 numpy/pyarrow 存在
+  交叉版本约束），离线现场用离线工具包（wheelhouse）补装：见 Release 页 Docker 段说明
+
 ## 1.3.1 — 2026-11-27
 
 ### Fixed

@@ -52,6 +52,10 @@ docker run --rm -it -p 8080:8080 \
 
 在浏览器访问 `http://<服务器IP>:8080`。去除 `--gui` 相关参数则进入 CLI 菜单模式。
 
+> **代理环境注意**：宿主设置了 `HTTP_PROXY/HTTPS_PROXY` 时，容器内验收会继承代理导致
+> 连本机 mock/内网服务失败（502/超时）。运行容器时显式清除：
+> `docker run ... -e HTTP_PROXY= -e HTTPS_PROXY= -e http_proxy= -e https_proxy=`
+
 ### 1.4 离线工具包（含全部依赖）
 
 `ucm-accept-offline-tooling-<版本>-<架构>.tar.gz` 内含验收工具、全部依赖 wheel、离线配置模板与本文档：

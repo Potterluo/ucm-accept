@@ -47,7 +47,7 @@ COPY assets/ /opt/ucm-accept/assets/
 COPY packaging/config.offline.yaml /etc/ucm-accept/config.yaml
 COPY packaging/entrypoint.sh /usr/local/bin/ucm-accept-entrypoint
 RUN chmod +x /usr/local/bin/ucm-accept-entrypoint \
-    && chown -R ucm:ucm /opt/ucm-accept
+    && chown -R ucm:ucm /opt/ucm-accept /opt/venv
 
 USER ucm
 WORKDIR /data

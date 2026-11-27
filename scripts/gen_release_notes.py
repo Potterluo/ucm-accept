@@ -81,7 +81,7 @@ def build_notes(tag: str, repo: str, image: str) -> str:
     add("包含 16 个 tokenizer、精度数据集、多轮场景与 AgentX traces（约 5GB）。"
         "超 2GiB 由 CI 自动分卷（GitHub Release 单文件上限）。三种导入方式任选：")
     add("")
-    add("**方式一（推荐，全平台零命令行）**：启动 GUI（Windows 桌面版运行 `ucm-accept-gui.exe`）→ 右上 ⚙ 齿轮 →"
+    add("**方式一（推荐，全平台零命令行）**：双击 `ucm-accept.exe` 打开验收菜单，输入 `G` 启动浏览器 GUI → 右上 ⚙ 齿轮 →"
         "「离线资产包」→ 填入 `part-00` 文件路径 → 点「导入并校验」。"
         "分卷合并、解压、SHA256 校验一步完成，当前会话即时生效。")
     add("")

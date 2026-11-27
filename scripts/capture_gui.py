@@ -94,7 +94,7 @@ def capture(out_dir: Path, tar_path: Path, release_url: str) -> list[dict]:
         page.goto(BASE_URL, wait_until="domcontentloaded")
         page.wait_for_selector(".hero", timeout=30000)
         page.wait_for_timeout(2500)
-        shot("home", "② 启动 GUI — 双击 ucm-accept-gui.exe（或 ucm-accept --gui），填服务地址与模型")
+        shot("home", "② 双击 ucm-accept.exe 打开验收菜单，输入 G 启动浏览器 GUI，填服务地址与模型")
 
         # 3. 齿轮 → 离线资产包（初始状态）
         page.click("button.gear")
@@ -166,7 +166,7 @@ def write_index(out_dir: Path, pages: list[dict], release_url: str) -> None:
 
 <div class="step"><div class="num">2</div><div class="body">
   <h2>启动 GUI</h2>
-  <p>双击 <code>ucm-accept-gui.exe</code>，浏览器自动打开控制台。首页填被测服务的
+  <p>双击 <code>ucm-accept.exe</code> 打开<b>验收菜单</b>（交互式 CLI），输入 <code>G</code> 即可启动浏览器 GUI（菜单内所有配置与 GUI 实时互通）。首页填被测服务的
   <b>服务地址</b>（如 <code>http://127.0.0.1:8000/v1</code>）与 <b>模型名称</b>（--served-model-name），
   点「检测连通」验证上下文窗口。</p>
   {fig("home")}

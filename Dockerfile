@@ -14,19 +14,14 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
 COPY pyproject.toml README.md ./
-COPY packaging/bfcl-eval-deps.txt ./packaging/bfcl-eval-deps.txt
 COPY ucm_accept ./ucm_accept
 COPY wheelhouse ./wheelhouse
 
 RUN if [ "${OFFLINE}" = "1" ]; then \
       pip install --no-index --find-links=/build/wheelhouse setuptools wheel; \
       pip install --no-build-isolation --no-index --find-links=/build/wheelhouse /build "evalscope[perf,eval,agentx]==1.15.0" "pyarrow==21.0.0"; \
-      pip install "bfcl-eval==2025.10.27.1" --no-deps \ \
-      && pip install -r /build/packaging/bfcl-eval-deps.txt; \
     else \
       pip install /build "evalscope[perf,eval,agentx]==1.15.0" "pyarrow==21.0.0"; \
-      pip install "bfcl-eval==2025.10.27.1" --no-deps \ \
-      && pip install -r /build/packaging/bfcl-eval-deps.txt; \
     fi
 
 FROM python:${PYTHON_VERSION}-slim-bookworm

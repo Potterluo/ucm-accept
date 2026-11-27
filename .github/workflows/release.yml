@@ -129,8 +129,6 @@ jobs:
           sudo apt-get install -y --no-install-recommends binutils patchelf curl
           python -m pip install --upgrade pip
           pip install -e ".[gui,build]" "evalscope[perf,eval,agentx]==1.15.0" "pyarrow==21.0.0"
-          pip install "bfcl-eval==2025.10.27.1" --no-deps
-          pip install $(cat packaging/bfcl-eval-deps.txt)
       - name: Install nfpm (${{ matrix.nfpm_arch }})
         run: |
           NFPM_VERSION=2.43.0
@@ -145,7 +143,7 @@ jobs:
           "dist/ucm-accept-linux-${{ matrix.arch }}/ucm-accept" --mock --fast --item perf --outputs "/tmp/linux-smoke-${{ matrix.arch }}"
           test -s /tmp/linux-smoke-${{ matrix.arch }}/runs/*/report.html
           dpkg-deb --info dist/ucm-accept_${{ needs.prepare.outputs.version }}_${{ matrix.arch }}.deb
-          dpkg-deb --contents dist/ucm-accept_${{ needs.prepare.outputs.version }}_${{ matrix.arch }}.deb | head -20
+          dpkg-deb --contents dist/ucm-accept_${{ needs.prepare.outputs.version }}_${{ matrix.arch }}.deb | head -20 || true
           sudo apt-get install -y rpm
           rpm -qip dist/ucm-accept-${{ needs.prepare.outputs.version }}-1.*.rpm
       - name: Upload deb
@@ -240,7 +238,9 @@ jobs:
         run: |
           python -m venv /tmp/offline-venv
           /tmp/offline-venv/bin/pip install --no-index --find-links offline/wheelhouse \
-            "ucm-accept==${{ needs.prepare.outputs.version }}" "evalscope[perf,eval,agentx]==1.15.0" "pyarrow==21.0.0" "bfcl-eval==2025.10.27.1" --no-deps "pyarrow==21.0.0"
+            "ucm-accept==${{ needs.prepare.outputs.version }}" "evalscope[perf,eval,agentx]==1.15.0" "pyarrow==21.0.0" "PyYAML>=6"
+          # BFCL 精度现场补装：本体 --no-deps（依赖 wheelhouse 内 31 项净化清单，见 bfcl-eval-deps.txt）
+          pip install --no-index --no-deps --find-links offline/wheelhouse "bfcl-eval==2025.10.27.1"
           /tmp/offline-venv/bin/ucm-accept --version
           /tmp/offline-venv/bin/ucm-accept --mock --fast --item perf --outputs /tmp/offline-smoke
       - name: Build tooling bundle

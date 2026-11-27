@@ -27,11 +27,14 @@ if ($Arch -eq "arm64") {
     # 真实验收请使用 Windows x64 或 Linux 版本。
     Write-Host "ARM64 Windows: 打包 mock 版（evalscope 因 pyarrow 缺 win_arm64 轮子而不可用）"
 } else {
-    pip install "evalscope[perf,eval,bfcl,agentx]==1.15.0" "pyarrow==21.0.0"
+    pip install "evalscope[perf,eval,agentx]==1.15.0" "pyarrow==21.0.0"
     Stop-OnExit
 
-    # bfcl-eval 依赖链会拉入过时的 pathlib backport（必须在 evalscope 安装后卸载），PyInstaller 拒绝与其共存
-    pip uninstall -y pathlib
+    # bfcl-eval 依赖链含 pathlib backport（py3.11 无发行版）与 numpy 钉死，走 --no-deps + 显式清单
+    $BFCL_EVAL_DEPS = (Get-Content packaging/bfcl-eval-deps.txt) -join " "
+    pip install "bfcl-eval==2025.10.27.1" --no-deps
+    if ($LASTEXITCODE -gt 2) { Stop-OnExit }
+    pip install $BFCL_EVAL_DEPS.Split()
     if ($LASTEXITCODE -gt 2) { Stop-OnExit }
 }
 

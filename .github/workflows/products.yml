@@ -69,6 +69,7 @@ jobs:
         run: |
           pip install -e ".[gui,build]" "evalscope[perf,eval,agentx]==1.15.0" "pyarrow==21.0.0"
           pip install "bfcl-eval==2025.10.27.1" --no-deps
+          # shellcheck disable=SC2046 —— 清单按空白分词即为所需安装列表
           pip install $(cat packaging/bfcl-eval-deps.txt)
           VERSION="${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}"
           ./scripts/build_linux.sh "${VERSION#v}" ${{ matrix.arch }}

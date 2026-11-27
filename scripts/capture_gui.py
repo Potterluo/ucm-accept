@@ -42,6 +42,38 @@ def wait_ready(seconds: int = 60) -> bool:
     return False
 
 
+ANSI_COLORS = {"32": "#3fb950", "31": "#f85149", "33": "#d29922",
+               "36": "#79c0ff", "1": "#f0f6fc", "2": "#8b949e"}
+
+
+def capture_cli_menu_html() -> str:
+    """pty 跑一次交互菜单（立即 Q 退出），ANSI 输出转终端风格 HTML。"""
+    import os
+    import re
+    import tempfile
+
+    out_dir = tempfile.mkdtemp(prefix="ucm-cli-")
+    inner = (f'cd "{ROOT}" && CUDA_VISIBLE_DEVICES="" UCM_ASSETS_DIR= '
+             f'"{sys.executable}" -m ucm_accept --mock --outputs "{out_dir}"')
+    res = subprocess.run(
+        ["script", "-qec", f'printf "Q\n" | {inner}', "/dev/null"],
+        capture_output=True, text=True, timeout=120, env={**os.environ},
+    )
+    text = res.stdout.replace("\r", "")
+    text = re.sub(r"\x1b\[K|\x1b\[\?2004[hl]", "", text)
+    def esc(seg: str) -> str:
+        return seg.replace("&", "&amp;").replace("<", "&lt;")
+
+    rendered, cursor, color = "", 0, None
+    for m in re.finditer(r"\x1b\[(\d+)m", text):
+        seg = text[cursor:m.start()]
+        rendered += (f'<span style="color:{color}">{esc(seg)}</span>' if color else esc(seg))
+        color = ANSI_COLORS.get(m.group(1))
+        cursor = m.end()
+    tail = text[cursor:]
+    rendered += (f'<span style="color:{color}">{esc(tail)}</span>' if color else esc(tail))
+    return rendered
+
 def prepare_guide_pack(out_dir: Path) -> tuple[Path, Path]:
     """生成演示用真实资产包（含 manifest）及其 tar.gz，返回 (pack_root, tar_path)。"""
     pack = out_dir / "guide-pack"
@@ -135,6 +167,54 @@ def capture(out_dir: Path, tar_path: Path, release_url: str) -> list[dict]:
         page.wait_for_timeout(800)
         shot("report", "⑧ 完整报告 — 自包含 HTML，支持导出 PDF，离线归档分发", full=True)
 
+        # 9. CLI 验收菜单（终端风格模拟：真实 ANSI 输出渲染）
+        cli_html = capture_cli_menu_html()
+        term = f"""<!DOCTYPE html><html><body style="margin:0;background:#0d1117">
+<div style="max-width:880px;margin:24px auto;background:#161b22;border-radius:12px;overflow:hidden;
+     box-shadow:0 8px 24px rgba(0,0,0,.4)">
+<div style="background:#21262d;padding:10px 14px;display:flex;gap:8px">
+  <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57"></span>
+  <span style="width:12px;height:12px;border-radius:50%;background:#febc2e"></span>
+  <span style="width:12px;height:12px;border-radius:50%;background:#28c840"></span>
+  <span style="color:#8b949e;font-size:12px;margin-left:10px;font-family:monospace">
+    ucm-accept.exe — 验收菜单</span></div>
+<pre style="margin:0;padding:18px 22px;color:#c9d1d9;font-family:'Cascadia Mono',Consolas,monospace;
+     font-size:12.5px;line-height:1.45;white-space:pre-wrap">{cli_html}</pre>
+</div></body></html>"""
+        page.set_content(term)
+        page.wait_for_timeout(400)
+        shot("cli-menu", "⑨ 也可以不进 GUI——双击 exe 直接在验收菜单里完成全部操作（输入 G 随时切浏览器 GUI）")
+
+        # 10. 结果对比：CLI 跑第二次（共享输出目录）→ 对比面板选两个结果 → 生成
+        subprocess.run(
+            [sys.executable, "-m", "ucm_accept", "--mock", "--all",
+             "--outputs", str(out_dir / "outputs")],
+            cwd=str(ROOT), check=True, capture_output=True, timeout=1800,
+        )
+        page.goto(BASE_URL, wait_until="domcontentloaded")
+        page.wait_for_timeout(1500)
+        page.click("text=结果对比")
+        page.wait_for_timeout(800)
+        page.click("text=+ 添加结果")
+        page.wait_for_timeout(500)
+        labels = ["加速后", "原生基线"]
+        for i, sel in enumerate(page.locator("#compare-rows .cmp-row").all()):
+            sel.locator("select.cmp-source").select_option(index=i + 1)
+            sel.locator("input.cmp-label").fill(labels[i])
+        page.locator("#compare-panel").scroll_into_view_if_needed()
+        shot("compare-select", "⑩ 结果对比 — 勾选两次验收（GUI 与 CLI 的结果同目录互通），生成并排对比")
+        with page.context.expect_page(timeout=30000) as popup:
+            page.click("text=生成对比报告")
+        compare_page = popup.value
+        compare_page.wait_for_load_state("domcontentloaded")
+        compare_page.wait_for_timeout(1500)
+        compare_page.set_viewport_size({"width": 1440, "height": 1080})
+        path = shots_dir / "compare-report.png"
+        compare_page.screenshot(path=str(path), full_page=True)
+        pages.append({"file": "screenshots/compare-report.png",
+                      "caption": "⑪ 对比报告 — 多次验收并排：指标、曲线与逐项结论（HTML 独立文件可分发）"})
+        print("  截图 compare-report", flush=True)
+
         browser.close()
     return pages
 
@@ -165,14 +245,22 @@ def write_index(out_dir: Path, pages: list[dict], release_url: str) -> None:
 </div></div>
 
 <div class="step"><div class="num">2</div><div class="body">
-  <h2>启动 GUI</h2>
-  <p>双击 <code>ucm-accept.exe</code> 打开<b>验收菜单</b>（交互式 CLI），输入 <code>G</code> 即可启动浏览器 GUI（菜单内所有配置与 GUI 实时互通）。首页填被测服务的
-  <b>服务地址</b>（如 <code>http://127.0.0.1:8000/v1</code>）与 <b>模型名称</b>（--served-model-name），
-  点「检测连通」验证上下文窗口。</p>
-  {fig("home")}
+  <h2>双击启动 · 验收菜单</h2>
+  <p>双击 <code>ucm-accept.exe</code>（解压目录内）打开<b>交互式验收菜单</b>：
+  输入编号跑单项/组合、<code>C</code> 改每项配置、<code>P</code> 导入资产包、<code>L</code> 对比历史——
+  输入 <code>G</code> 随时切换到浏览器 GUI（两者共用同一份配置与输出目录，互相看得见对方的结果）。</p>
+  {fig("cli-menu")}
 </div></div>
 
 <div class="step"><div class="num">3</div><div class="body">
+  <h2>启动浏览器 GUI</h2>
+  <p>输入 <code>G</code> 后浏览器自动打开控制台（也可命令行 <code>ucm-accept --gui</code>）。
+  首页填被测服务的 <b>服务地址</b>（如 <code>http://127.0.0.1:8000/v1</code>）与
+  <b>模型名称</b>（--served-model-name），点「检测连通」验证上下文窗口。</p>
+  {fig("home")}
+</div></div>
+
+<div class="step"><div class="num">4</div><div class="body">
   <h2>导入离线资源包</h2>
   <p>内网环境必做。右上角 <b>⚙ 齿轮</b> → 「离线资产包」→ 填入资源包路径
   （<code>tar.gz</code>、<code>part-00</code> 分卷或已解压目录均可）→ 点「导入并校验」。
@@ -183,7 +271,7 @@ def write_index(out_dir: Path, pages: list[dict], release_url: str) -> None:
   （copy /b 合并 → Get-FileHash 校验 → tar 解压）。</aside>
 </div></div>
 
-<div class="step"><div class="num">4</div><div class="body">
+<div class="step"><div class="num">5</div><div class="body">
   <h2>配置并执行</h2>
   <p>每个测试项行内「配置」可展开单项参数（并发档位、多轮场景、SLA 探测区间、精度数据集与样本上限等），
   改完即生效。勾选要执行的测试项，点「执行勾选的验收测试」——进度与日志实时滚动，可随时「停止当前任务」，
@@ -192,12 +280,20 @@ def write_index(out_dir: Path, pages: list[dict], release_url: str) -> None:
   {fig("running")}
 </div></div>
 
-<div class="step"><div class="num">5</div><div class="body">
-  <h2>查看结果</h2>
+<div class="step"><div class="num">6</div><div class="body">
+  <h2>查看结果与对比</h2>
   <p>跑完自动出<b>验收结论</b>（通过 / 有条件通过 / 不通过）与各项耗时摘要；报告区为自包含 HTML，
   点「导出 HTML / 导出 PDF」归档分发。所有判定由 EvalScope 原生引擎执行，报告内附原始数据路径。</p>
   {fig("result")}
   {fig("report")}
+</div></div>
+
+<div class="step"><div class="num">7</div><div class="body">
+  <h2>多次验收 · 对比</h2>
+  <p>改参数（或换部署）再跑一次，点「结果对比」勾选两次验收——吞吐、TTFT/TPOT、逐项结论并排呈现，
+  一眼看出加速效果。对比报告是独立 HTML，可单独归档分发。</p>
+  {fig("compare-select")}
+  {fig("compare-report")}
 </div></div>
 """
     steps_html = f'<section id="steps">{steps_html}</section>' if has("home") else ""
